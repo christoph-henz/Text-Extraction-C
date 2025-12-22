@@ -8,6 +8,8 @@ set(SOURCES
     src/main.cpp
     src/ViewModels/MainViewModel.cpp
     src/UseCases/ExtractTextUseCase.cpp
+    src/UI/Widget.cpp
+    src/UI/Sidebar.cpp
 )
 
 add_library(tef_core INTERFACE)
