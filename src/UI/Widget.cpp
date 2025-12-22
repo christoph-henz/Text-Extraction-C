@@ -27,25 +27,23 @@ void Button::draw(sf::RenderWindow &window)
     window.draw(border);
     
     // Draw text
-    sf::Text text(font_, label_, 14u);
+    sf::Text text(label_, font_, 14u);
     text.setFillColor(textColor_);
-    text.setPosition(sf::Vector2f(position_.x + 10.f, position_.y + 10.f));
+    text.setPosition(position_.x + 10.f, position_.y + 10.f);
     window.draw(text);
 }
 
 void Button::handleEvent(const sf::Event &event)
 {
-    if (event.is<sf::Event::MouseMoved>()) {
-        auto pos = event.getIf<sf::Event::MouseMoved>();
-        sf::Vector2f mousePos(static_cast<float>(pos->position.x), static_cast<float>(pos->position.y));
+    if (event.type == sf::Event::MouseMoved) {
+        sf::Vector2f mousePos(static_cast<float>(event.mouseMove.x), static_cast<float>(event.mouseMove.y));
         isHovered_ = (mousePos.x >= position_.x && mousePos.x < position_.x + size_.x &&
                       mousePos.y >= position_.y && mousePos.y < position_.y + size_.y);
     }
     
-    if (event.is<sf::Event::MouseButtonPressed>()) {
-        auto pos = event.getIf<sf::Event::MouseButtonPressed>();
-        if (pos->button == sf::Mouse::Button::Left) {
-            sf::Vector2f mousePos(static_cast<float>(pos->position.x), static_cast<float>(pos->position.y));
+    if (event.type == sf::Event::MouseButtonPressed) {
+        if (event.mouseButton.button == sf::Mouse::Left) {
+            sf::Vector2f mousePos(static_cast<float>(event.mouseButton.x), static_cast<float>(event.mouseButton.y));
             if (mousePos.x >= position_.x && mousePos.x < position_.x + size_.x &&
                 mousePos.y >= position_.y && mousePos.y < position_.y + size_.y) {
                 if (callback_) callback_();

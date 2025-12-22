@@ -14,9 +14,9 @@ using namespace Presentation::ViewModel;
 void RunGui(MainViewModel &vm)
 {
 #ifdef USE_SFML
-    sf::RenderWindow window(sf::VideoMode(sf::Vector2u(1200, 700)), "Text Extraction - MVVM (SFML)");
+    sf::RenderWindow window(sf::VideoMode(1200, 700), "Text Extraction - MVVM (SFML)");
     sf::Font font;
-    if (!font.openFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")) {
+    if (!font.loadFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")) {
         // try default
     }
     
@@ -38,11 +38,12 @@ void RunGui(MainViewModel &vm)
     sidebar->addItemToRibbon("Profil", {"Logout", nullptr});
     
     while (window.isOpen()) {
-        while (auto event = window.pollEvent()) {
-            if (event->is<sf::Event::Closed>()) window.close();
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) window.close();
             
             // Pass events to UI
-            sidebar->handleEvent(*event);
+            sidebar->handleEvent(event);
         }
         
         window.clear(sf::Color::White);
@@ -53,25 +54,25 @@ void RunGui(MainViewModel &vm)
         // Draw main content area
         float sidebarWidth = sidebar->getWidth();
         sf::RectangleShape contentArea(sf::Vector2f(1200.f - sidebarWidth, 700.f));
-        contentArea.setPosition(sf::Vector2f(sidebarWidth, 0.f));
+        contentArea.setPosition(sidebarWidth, 0.f);
         contentArea.setFillColor(sf::Color(240, 240, 240));
         window.draw(contentArea);
         
         // Draw header text
-        sf::Text header(font, "Text Extraction System", 28u);
+        sf::Text header("Text Extraction System", font, 28u);
         header.setFillColor(sf::Color::Black);
-        header.setPosition(sf::Vector2f(sidebarWidth + 20.f, 20.f));
+        header.setPosition(sidebarWidth + 20.f, 20.f);
         window.draw(header);
         
         // Draw status info
-        sf::Text status(font, "Status: " + vm.GetStatus(), 14u);
+        sf::Text status("Status: " + vm.GetStatus(), font, 14u);
         status.setFillColor(sf::Color(100, 100, 100));
-        status.setPosition(sf::Vector2f(sidebarWidth + 20.f, 70.f));
+        status.setPosition(sidebarWidth + 20.f, 70.f);
         window.draw(status);
         
-        sf::Text result(font, "Last Result: " + vm.GetLastResult(), 12u);
+        sf::Text result("Last Result: " + vm.GetLastResult(), font, 12u);
         result.setFillColor(sf::Color(100, 100, 100));
-        result.setPosition(sf::Vector2f(sidebarWidth + 20.f, 100.f));
+        result.setPosition(sidebarWidth + 20.f, 100.f);
         window.draw(result);
         
         window.display();

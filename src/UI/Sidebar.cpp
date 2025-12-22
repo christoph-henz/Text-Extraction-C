@@ -31,7 +31,6 @@ Sidebar::Sidebar(const sf::Font &font, float width, float height)
 void Sidebar::draw(sf::RenderWindow &window)
 {
     background_.setSize(sf::Vector2f(getWidth(), height_));
-    background_.setPosition(sf::Vector2f(0.f, 0.f));
     window.draw(background_);
     
     // Draw toggle button
@@ -45,14 +44,14 @@ void Sidebar::draw(sf::RenderWindow &window)
             
             // Draw ribbon button background
             sf::RectangleShape ribbonBg(sf::Vector2f(width_ - 10.f, 30.f));
-            ribbonBg.setPosition(sf::Vector2f(5.f, yOffset));
+            ribbonBg.setPosition(5.f, yOffset);
             ribbonBg.setFillColor(ribbon.hovered ? sf::Color(70, 70, 73) : sf::Color(55, 55, 58));
             window.draw(ribbonBg);
             
             // Draw ribbon text
-            sf::Text ribbonText(font_, ribbon.name, 13u);
+            sf::Text ribbonText(ribbon.name, font_, 13u);
             ribbonText.setFillColor(sf::Color(220, 220, 220));
-            ribbonText.setPosition(sf::Vector2f(15.f, yOffset + 5.f));
+            ribbonText.setPosition(15.f, yOffset + 5.f);
             window.draw(ribbonText);
             
             yOffset += 35.f;
@@ -61,13 +60,13 @@ void Sidebar::draw(sf::RenderWindow &window)
             if (ribbon.isOpen) {
                 for (auto &item : ribbon.items) {
                     sf::RectangleShape itemBg(sf::Vector2f(width_ - 15.f, 25.f));
-                    itemBg.setPosition(sf::Vector2f(10.f, yOffset));
+                    itemBg.setPosition(10.f, yOffset);
                     itemBg.setFillColor(sf::Color(50, 50, 53));
                     window.draw(itemBg);
                     
-                    sf::Text itemText(font_, "► " + item.name, 11u);
+                    sf::Text itemText("► " + item.name, font_, 11u);
                     itemText.setFillColor(sf::Color(180, 180, 180));
-                    itemText.setPosition(sf::Vector2f(20.f, yOffset + 4.f));
+                    itemText.setPosition(20.f, yOffset + 4.f);
                     window.draw(itemText);
                     yOffset += 28.f;
                 }
@@ -81,15 +80,15 @@ void Sidebar::draw(sf::RenderWindow &window)
             
             // Draw icon button background
             sf::RectangleShape iconBg(sf::Vector2f(45.f, 45.f));
-            iconBg.setPosition(sf::Vector2f(7.f, yOffset));
+            iconBg.setPosition(7.f, yOffset);
             iconBg.setFillColor(ribbon.hovered ? sf::Color(70, 70, 73) : sf::Color(55, 55, 58));
             window.draw(iconBg);
             
             // Draw icon (first letter)
             std::string iconStr(1, ribbon.icon);
-            sf::Text iconText(font_, iconStr, 20u);
+            sf::Text iconText(iconStr, font_, 20u);
             iconText.setFillColor(sf::Color(200, 200, 200));
-            iconText.setPosition(sf::Vector2f(17.f, yOffset + 8.f));
+            iconText.setPosition(17.f, yOffset + 8.f);
             window.draw(iconText);
             
             yOffset += 52.f;
@@ -101,15 +100,14 @@ void Sidebar::handleEvent(const sf::Event &event)
 {
     toggleButton_.handleEvent(event);
     
-    if (event.is<sf::Event::MouseMoved>()) {
-        auto pos = event.getIf<sf::Event::MouseMoved>();
+    if (event.type == sf::Event::MouseMoved) {
         float yOffset = 65.f;
         int newHovered = -1;
         
         for (size_t i = 0; i < ribbons_.size(); ++i) {
             float itemHeight = isExpanded_ ? 35.f : 52.f;
-            if (pos->position.y >= yOffset && pos->position.y < yOffset + itemHeight &&
-                pos->position.x < getWidth()) {
+            if (event.mouseMove.y >= yOffset && event.mouseMove.y < yOffset + itemHeight &&
+                event.mouseMove.x < getWidth()) {
                 newHovered = i;
                 break;
             }
@@ -123,14 +121,13 @@ void Sidebar::handleEvent(const sf::Event &event)
     }
     
     // Handle ribbon clicks for expanding/collapsing
-    if (event.is<sf::Event::MouseButtonPressed>()) {
-        auto pos = event.getIf<sf::Event::MouseButtonPressed>();
+    if (event.type == sf::Event::MouseButtonPressed) {
         float yOffset = 65.f;
         
         for (auto &ribbon : ribbons_) {
             float itemHeight = isExpanded_ ? 35.f : 52.f;
-            if (pos->position.y >= yOffset && pos->position.y < yOffset + itemHeight &&
-                pos->position.x < getWidth()) {
+            if (event.mouseButton.y >= yOffset && event.mouseButton.y < yOffset + itemHeight &&
+                event.mouseButton.x < getWidth()) {
                 ribbon.isOpen = !ribbon.isOpen;
                 break;
             }
@@ -138,8 +135,8 @@ void Sidebar::handleEvent(const sf::Event &event)
             
             if (ribbon.isOpen) {
                 for (auto &item : ribbon.items) {
-                    if (pos->position.y >= yOffset && pos->position.y < yOffset + 28.f &&
-                        pos->position.x < getWidth()) {
+                    if (event.mouseButton.y >= yOffset && event.mouseButton.y < yOffset + 28.f &&
+                        event.mouseButton.x < getWidth()) {
                         if (item.callback) item.callback();
                     }
                     yOffset += 28.f;
