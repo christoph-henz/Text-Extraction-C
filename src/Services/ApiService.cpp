@@ -7,6 +7,21 @@
 #include <iomanip>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <functional>
+
+// Helper function declarations outside namespace
+static std::string extractJsonValue(const std::string& json, const std::string& key) {
+    std::string searchKey = "\"" + key + "\":\"";
+    size_t pos = json.find(searchKey);
+    if (pos == std::string::npos) return "";
+    
+    pos += searchKey.length();
+    size_t endPos = json.find("\"", pos);
+    if (endPos == std::string::npos) return "";
+    
+    return json.substr(pos, endPos - pos);
+}
 
 namespace Services {
 
@@ -285,7 +300,14 @@ HttpResponse ApiService::Login(const std::string& username, const std::string& p
     std::string hashedPassword = HashPassword(password);
     std::string endpoint = "User?username=" + username + "&password=" + hashedPassword;
     
-    return Get(endpoint);
+    HttpResponse resp = Get(endpoint);
+    
+    // Parse die Response um Email und Role zu extrahieren
+    if (resp.isSuccess && !resp.body.empty()) {
+        ParseLoginResponse(resp);
+    }
+    
+    return resp;
 }
 
 HttpResponse ApiService::UploadFile(const std::string& filePath, 
@@ -428,6 +450,13 @@ std::string ApiService::BytesToHex(const unsigned char* bytes, size_t length)
         ss << std::hex << std::setw(2) << std::setfill('0') << (int)bytes[i];
     }
     return ss.str();
+}
+
+void ApiService::ParseLoginResponse(HttpResponse& response)
+{
+    response.user_email = extractJsonValue(response.body, "email");
+    response.user_role = extractJsonValue(response.body, "role");
+    response.user_token = extractJsonValue(response.body, "token");
 }
 
 } // namespace Services

@@ -32,6 +32,10 @@ public:
     float getWidth() const { return isExpanded_ ? width_ : collapsedWidth_; }
     float getHeight() const { return height_; }
     
+    /// Get which ribbon was clicked (0-5 for the 6 ribbons, -1 if none)
+    int getLastClickedRibbon() const { return lastClickedRibbon_; }
+    void resetClickedRibbon() { lastClickedRibbon_ = -1; }
+    
 private:
     const sf::Font &font_;
     float width_;
@@ -55,6 +59,7 @@ private:
     std::vector<Button> ribbonButtons_;
     std::vector<Button> itemButtons_;
     int hoveredRibbonIndex_ = -1;
+    int lastClickedRibbon_ = -1;
     
     void updateLayout();
 };

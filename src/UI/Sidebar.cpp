@@ -123,12 +123,14 @@ void Sidebar::handleEvent(const sf::Event &event)
     // Handle ribbon clicks for expanding/collapsing
     if (event.type == sf::Event::MouseButtonPressed) {
         float yOffset = 65.f;
+        int ribbonIndex = 0;
         
         for (auto &ribbon : ribbons_) {
             float itemHeight = isExpanded_ ? 35.f : 52.f;
             if (event.mouseButton.y >= yOffset && event.mouseButton.y < yOffset + itemHeight &&
                 event.mouseButton.x < getWidth()) {
                 ribbon.isOpen = !ribbon.isOpen;
+                lastClickedRibbon_ = ribbonIndex;
                 break;
             }
             yOffset += itemHeight;
@@ -142,6 +144,7 @@ void Sidebar::handleEvent(const sf::Event &event)
                     yOffset += 28.f;
                 }
             }
+            ++ribbonIndex;
         }
     }
 }

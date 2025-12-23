@@ -15,6 +15,11 @@ struct HttpResponse {
     std::string body;
     std::map<std::string, std::string> headers;
     bool isSuccess = false;
+    
+    // Login-Daten aus JSON-Response
+    std::string user_email;
+    std::string user_role;
+    std::string user_token;
 };
 
 /// <summary>
@@ -94,6 +99,10 @@ private:
     /// Konvertiert Bytes zu Hex-String
     /// </summary>
     static std::string BytesToHex(const unsigned char* bytes, size_t length);
+    
+    /// <summary>
+    /// Parst JSON Response für Login-Daten
+    /// </summary>
+    static void ParseLoginResponse(HttpResponse& response);
 };
-
 } // namespace Services
