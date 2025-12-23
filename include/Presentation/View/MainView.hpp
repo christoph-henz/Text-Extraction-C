@@ -17,12 +17,13 @@ using namespace Presentation::ViewModel;
 void RunGui(Presentation::ViewModel::MainViewModel &vm)
 {
 #ifdef USE_SFML
-    // Initialize API Service with default
+    // Initialize Services
     Services::ApiService::Initialize("127.0.0.1", 5000);
+    Services::LoginService::Initialize();
     
     // Check if user is already logged in
     bool userAlreadyLoggedIn = Services::LoginService::IsLoggedIn();
-    
+
     sf::RenderWindow window(sf::VideoMode(1200, 700), "Text Extraction - MVVM (SFML)");
     sf::Font font;
     if (!font.loadFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")) {
@@ -60,6 +61,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     bool isLoginInputMode = true; // false = show user data
     Services::LoginInfo userInfo{"Guest", "", "User", ""};
     bool showPasswordInput = false; // Show actual password chars or dots
+    bool usernameFocused = false;
+    bool passwordFocused = false;
     
     // Initialize with logged-in state if user exists
     if (userAlreadyLoggedIn) {
@@ -67,10 +70,14 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
         auto info = Services::LoginService::GetLoginInfo();
         if (info.has_value()) {
             userInfo = info.value();
-        }
+}
+    } else {
+        std::cout << "Zeige Login-Formular" << std::endl;
     }
     
     while (window.isOpen()) {
+        float sidebarWidth = sidebar->getWidth();
+        
         sf::Event event;
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed) window.close();
@@ -96,25 +103,67 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
             
             // Handle text input for login
             if (activeTab == 5 && isLoginInputMode && event.type == sf::Event::TextEntered) {
-                // Determine if username or password field is active (simple tab detection)
-                // For now, username first, then password after first Enter press
-                // This is a simplified approach - a proper implementation would use UI focus states
-                static bool usernameActive = true;
-                
                 if (event.text.unicode == 9) { // Tab key - switch fields
-                    usernameActive = !usernameActive;
+                    usernameFocused = !usernameFocused;
+                    passwordFocused = !passwordFocused;
                 } else if (event.text.unicode == 8) { // Backspace
-                    if (usernameActive && !loginUsername.empty()) {
+                    if (usernameFocused && !loginUsername.empty()) {
                         loginUsername.pop_back();
-                    } else if (!usernameActive && !loginPassword.empty()) {
+                    } else if (passwordFocused && !loginPassword.empty()) {
                         loginPassword.pop_back();
                     }
                 } else if (event.text.unicode >= 32 && event.text.unicode < 127) {
-                    if (usernameActive) {
+                    if (usernameFocused) {
                         loginUsername += static_cast<char>(event.text.unicode);
-                    } else {
+                    } else if (passwordFocused) {
                         loginPassword += static_cast<char>(event.text.unicode);
                     }
+                }
+            }
+            
+            // Handle mouse clicks for login fields
+            if (activeTab == 5 && isLoginInputMode && event.type == sf::Event::MouseButtonPressed) {
+                // Check click on username field
+                if (event.mouseButton.x >= sidebarWidth + 50.f && event.mouseButton.x <= sidebarWidth + 350.f &&
+                    event.mouseButton.y >= 160.f && event.mouseButton.y <= 195.f) {
+                    usernameFocused = true;
+                    passwordFocused = false;
+                } 
+                // Check click on password field
+                else if (event.mouseButton.x >= sidebarWidth + 50.f && event.mouseButton.x <= sidebarWidth + 350.f &&
+                         event.mouseButton.y >= 240.f && event.mouseButton.y <= 275.f) {
+                    usernameFocused = false;
+                    passwordFocused = true;
+                }
+                // Check for login button click
+                else if (event.mouseButton.x >= sidebarWidth + 50.f && event.mouseButton.x <= sidebarWidth + 150.f &&
+                    event.mouseButton.y >= 300.f && event.mouseButton.y <= 335.f) {
+                    // Perform login
+                    Services::HttpResponse resp = Services::ApiService::Login(loginUsername, loginPassword);
+                    if (resp.isSuccess) {
+                        // Save login info
+                        Services::LoginService::SaveLogin(loginUsername, resp.user_email, resp.user_role, "user");
+                        Services::ApiService::SetAuthCredentials(loginUsername, loginPassword);
+                        auto info = Services::LoginService::GetLoginInfo();
+                        if (info.has_value()) {
+                            userInfo = info.value();
+                        }
+                        isLoginInputMode = false;
+                        loginError = "";
+                    } else {
+                        loginError = "Login failed: " + std::to_string(resp.statusCode);
+                    }
+                }
+            }
+            // Handle logout button click
+            else if (activeTab == 5 && !isLoginInputMode && event.type == sf::Event::MouseButtonPressed) {
+                if (event.mouseButton.x >= sidebarWidth + 50.f && event.mouseButton.x <= sidebarWidth + 170.f &&
+                    event.mouseButton.y >= 280.f && event.mouseButton.y <= 315.f) {
+                    Services::LoginService::ClearLogin();
+                    isLoginInputMode = true;
+                    loginUsername = "";
+                    loginPassword = "";
+                    loginError = "";
                 }
             }
         }
@@ -125,15 +174,6 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
             // Map ribbons to tabs: Home=0, Upload=1, Extraktion=2, Admin=3, Einstellungen=4, Profil=5
             activeTab = clickedRibbon;
             sidebar->resetClickedRibbon();
-            
-            // Handle logout if Profil Logout is clicked
-            if (clickedRibbon == 5 && !isLoginInputMode) {
-                Services::LoginService::ClearLogin();
-                isLoginInputMode = true;
-                loginUsername = "";
-                loginPassword = "";
-                loginError = "";
-            }
         }
         
         window.clear(sf::Color::White);
@@ -142,7 +182,6 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
         sidebar->draw(window);
         
         // Draw main content area
-        float sidebarWidth = sidebar->getWidth();
         sf::RectangleShape contentArea(sf::Vector2f(1200.f - sidebarWidth, 700.f));
         contentArea.setPosition(sidebarWidth, 0.f);
         contentArea.setFillColor(sf::Color(240, 240, 240));
@@ -260,13 +299,13 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 if (event.mouseButton.x >= sidebarWidth + 20.f && event.mouseButton.x <= sidebarWidth + 220.f &&
                     event.mouseButton.y >= 250.f && event.mouseButton.y <= 285.f) {
                     bool connected = Services::ApiService::CheckConnection();
-                    apiResponse = connected ? "✓ Connected successfully!" : "✗ Connection failed!";
+                    apiResponse = connected ? "Connected successfully!" : "Connection failed!";
                 }
             }
             
             if (!apiResponse.empty()) {
                 sf::Text connStatus(apiResponse, font, 12u);
-                connStatus.setFillColor(apiResponse.find("✓") != std::string::npos ? sf::Color(50, 150, 50) : sf::Color(200, 50, 50));
+                connStatus.setFillColor(apiResponse.find("") != std::string::npos ? sf::Color(50, 150, 50) : sf::Color(200, 50, 50));
                 connStatus.setPosition(sidebarWidth + 20.f, 300.f);
                 window.draw(connStatus);
             }
@@ -287,8 +326,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 sf::RectangleShape userBox(sf::Vector2f(300.f, 35.f));
                 userBox.setPosition(sidebarWidth + 50.f, 160.f);
                 userBox.setFillColor(sf::Color::White);
-                userBox.setOutlineColor(sf::Color::Black);
-                userBox.setOutlineThickness(1.f);
+                userBox.setOutlineColor(usernameFocused ? sf::Color(70, 130, 180) : sf::Color::Black);
+                userBox.setOutlineThickness(usernameFocused ? 2.f : 1.f);
                 window.draw(userBox);
                 
                 sf::Text userDisplay(loginUsername, font, 12u);
@@ -305,8 +344,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 sf::RectangleShape passBox(sf::Vector2f(300.f, 35.f));
                 passBox.setPosition(sidebarWidth + 50.f, 240.f);
                 passBox.setFillColor(sf::Color::White);
-                passBox.setOutlineColor(sf::Color::Black);
-                passBox.setOutlineThickness(1.f);
+                passBox.setOutlineColor(passwordFocused ? sf::Color(70, 130, 180) : sf::Color::Black);
+                passBox.setOutlineThickness(passwordFocused ? 2.f : 1.f);
                 window.draw(passBox);
                 
                 // Show dots for password or actual text
@@ -326,28 +365,6 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 loginBtnText.setFillColor(sf::Color::White);
                 loginBtnText.setPosition(sidebarWidth + 75.f, 310.f);
                 window.draw(loginBtnText);
-                
-                // Check for login button click
-                if (event.type == sf::Event::MouseButtonPressed) {
-                    if (event.mouseButton.x >= sidebarWidth + 50.f && event.mouseButton.x <= sidebarWidth + 150.f &&
-                        event.mouseButton.y >= 300.f && event.mouseButton.y <= 335.f) {
-                        // Perform login
-                        Services::HttpResponse resp = Services::ApiService::Login(loginUsername, loginPassword);
-                        if (resp.isSuccess) {
-                            // Save login info
-                            Services::LoginService::SaveLogin(loginUsername, resp.user_email, resp.user_role, "user");
-                            Services::ApiService::SetAuthCredentials(loginUsername, loginPassword);
-                            auto info = Services::LoginService::GetLoginInfo();
-                            if (info.has_value()) {
-                                userInfo = info.value();
-                            }
-                            isLoginInputMode = false;
-                            loginError = "";
-                        } else {
-                            loginError = "Login failed: " + std::to_string(resp.statusCode);
-                        }
-                    }
-                }
                 
                 // Show error message
                 if (!loginError.empty()) {
@@ -404,18 +421,6 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 logoutBtnText.setFillColor(sf::Color::White);
                 logoutBtnText.setPosition(sidebarWidth + 68.f, 290.f);
                 window.draw(logoutBtnText);
-                
-                // Check for logout button click
-                if (event.type == sf::Event::MouseButtonPressed) {
-                    if (event.mouseButton.x >= sidebarWidth + 50.f && event.mouseButton.x <= sidebarWidth + 170.f &&
-                        event.mouseButton.y >= 280.f && event.mouseButton.y <= 315.f) {
-                        Services::LoginService::ClearLogin();
-                        isLoginInputMode = true;
-                        loginUsername = "";
-                        loginPassword = "";
-                        loginError = "";
-                    }
-                }
             }
         } else {
             // Other tabs - show default status

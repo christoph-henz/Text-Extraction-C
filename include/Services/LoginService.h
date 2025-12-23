@@ -4,6 +4,7 @@
 #include <optional>
 #include <memory>
 #include <functional>
+#include <vector>
 
 namespace Services {
 
@@ -84,6 +85,10 @@ private:
     static std::string GetStoragePath();
     static void LoadFromStorage();
     static void SaveToStorage();
+    
+    // Verschlüsselung für sichere Speicherung
+    static std::string Encrypt(const std::string& plaintext);
+    static std::string Decrypt(const std::string& ciphertext);
 };
 
 } // namespace Services

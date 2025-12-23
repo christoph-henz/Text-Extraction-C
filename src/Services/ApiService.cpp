@@ -54,7 +54,7 @@ static int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
 void ApiService::Initialize(const std::string& backendIp, int port)
 {
     _baseUrl = "http://" + backendIp + ":" + std::to_string(port) + "/api";
-    std::cout << "✓ ApiService initialisiert: " << _baseUrl << std::endl;
+    std::cout << "ApiService initialisiert: " << _baseUrl << std::endl;
 }
 
 void ApiService::SetApiUrl(const std::string& url)
@@ -63,7 +63,7 @@ void ApiService::SetApiUrl(const std::string& url)
     if (_baseUrl.back() == '/') {
         _baseUrl.pop_back();
     }
-    std::cout << "⚙ API-URL gesetzt: " << _baseUrl << std::endl;
+    std::cout << "API-URL gesetzt: " << _baseUrl << std::endl;
 }
 
 void ApiService::SetApiUrl(const std::string& ip, int port)
@@ -90,11 +90,11 @@ bool ApiService::CheckConnection(int timeoutSeconds)
         curl_easy_cleanup(curl);
 
         if (res == CURLE_OK) {
-            std::cout << "✓ Verbindung zu " << _baseUrl << " erfolgreich" << std::endl;
+            std::cout << "Verbindung zu " << _baseUrl << " erfolgreich" << std::endl;
             return true;
         }
         
-        std::cout << "✗ Verbindungsfehler: " << curl_easy_strerror(res) << std::endl;
+        std::cout << "Verbindungsfehler: " << curl_easy_strerror(res) << std::endl;
         return false;
     }
     catch (...) {
@@ -146,7 +146,7 @@ HttpResponse ApiService::Get(const std::string& endpoint)
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    std::cout << "GET " << url << " -> " << response.statusCode << std::endl;
+    //std::cout << "GET " << url << " -> " << response.statusCode << std::endl;
     return response;
 }
 
@@ -194,7 +194,7 @@ HttpResponse ApiService::Post(const std::string& endpoint, const std::string& js
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    std::cout << "POST " << url << " -> " << response.statusCode << std::endl;
+    //std::cout << "POST " << url << " -> " << response.statusCode << std::endl;
     return response;
 }
 
@@ -243,7 +243,7 @@ HttpResponse ApiService::Put(const std::string& endpoint, const std::string& jso
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    std::cout << "PUT " << url << " -> " << response.statusCode << std::endl;
+    //std::cout << "PUT " << url << " -> " << response.statusCode << std::endl;
     return response;
 }
 
@@ -291,7 +291,7 @@ HttpResponse ApiService::Delete(const std::string& endpoint)
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    std::cout << "DELETE " << url << " -> " << response.statusCode << std::endl;
+    //std::cout << "DELETE " << url << " -> " << response.statusCode << std::endl;
     return response;
 }
 
@@ -378,14 +378,13 @@ void ApiService::SetAuthCredentials(const std::string& username, const std::stri
 {
     _authUsername = username;
     _authPassword = password;
-    std::cout << "✓ Auth-Credentials gesetzt für: " << username << std::endl;
+    std::cout << "Auth-Credentials gesetzt für: " << username << std::endl;
 }
 
 void ApiService::ClearAuthCredentials()
 {
     _authUsername.clear();
     _authPassword.clear();
-    std::cout << "✓ Auth-Credentials gelöscht" << std::endl;
 }
 
 std::string ApiService::GetAuthHeader()
