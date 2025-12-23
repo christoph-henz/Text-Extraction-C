@@ -55,6 +55,13 @@ void ApiService::Initialize(const std::string& backendIp, int port)
 {
     _baseUrl = "http://" + backendIp + ":" + std::to_string(port) + "/api";
     std::cout << "ApiService initialisiert: " << _baseUrl << std::endl;
+    
+    // Lade gespeicherte Credentials vom LoginService
+    auto credentials = LoginService::GetStoredCredentials();
+    if (!credentials.first.empty()) {
+        std::cout << "DEBUG: Credentials vom LoginService geladen für User: " << credentials.first << std::endl;
+        SetAuthCredentials(credentials.first, credentials.second);
+    }
 }
 
 void ApiService::SetApiUrl(const std::string& url)
@@ -313,6 +320,8 @@ HttpResponse ApiService::Login(const std::string& username, const std::string& p
 HttpResponse ApiService::UploadFile(const std::string& filePath, 
                                     std::function<void(double)> progressCallback)
 {
+    std::cout << "UploadFile called with path: [" << filePath << "]" << std::endl;
+    
     CURL* curl = curl_easy_init();
     HttpResponse response;
 
@@ -322,27 +331,39 @@ HttpResponse ApiService::UploadFile(const std::string& filePath,
         return response;
     }
 
+    // Überprüfe ob Datei existiert
     FILE* fp = fopen(filePath.c_str(), "rb");
     if (!fp) {
+        std::cout << "ERROR: Cannot open file: " << filePath << std::endl;
         response.statusCode = 0;
         response.body = "Failed to open file";
         curl_easy_cleanup(curl);
         return response;
     }
+    fclose(fp);
 
     std::string readBuffer;
     std::string url = _baseUrl + "/Upload";
     std::string authHeader = GetAuthHeader();
 
     struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: multipart/form-data");
     if (!authHeader.empty()) {
+        std::cout << "DEBUG: Adding auth header to upload request" << std::endl;
         headers = curl_slist_append(headers, authHeader.c_str());
+    } else {
+        std::cout << "WARNING: No auth header available for upload!" << std::endl;
     }
+
+    // Erstelle MIME-Post für multipart Datei-Upload
+    curl_mime* mime = curl_mime_init(curl);
+    curl_mimepart* part = curl_mime_addpart(mime);
+    curl_mime_name(part, "file");
+    curl_mime_filedata(part, filePath.c_str());
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-    curl_easy_setopt(curl, CURLOPT_READDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L); // 5 Minuten für große Dateien
@@ -366,11 +387,14 @@ HttpResponse ApiService::UploadFile(const std::string& filePath,
         response.body = std::string("CURL Error: ") + curl_easy_strerror(res);
     }
 
+    curl_mime_free(mime);
     curl_slist_free_all(headers);
-    fclose(fp);
     curl_easy_cleanup(curl);
 
     std::cout << "UPLOAD " << filePath << " -> " << response.statusCode << std::endl;
+    if (!response.body.empty()) {
+        std::cout << "SERVER RESPONSE: " << response.body << std::endl;
+    }
     return response;
 }
 
@@ -390,8 +414,11 @@ void ApiService::ClearAuthCredentials()
 std::string ApiService::GetAuthHeader()
 {
     if (_authUsername.empty() || _authPassword.empty()) {
+        std::cout << "DEBUG: GetAuthHeader() - keine Credentials gespeichert" << std::endl;
         return "";
     }
+
+    std::cout << "DEBUG: GetAuthHeader() - Username: " << _authUsername << ", Password (gehashed): " << _authPassword.substr(0, 8) << "..." << std::endl;
 
     std::string credentials = _authUsername + ":" + _authPassword;
     // Base64 encoding (vereinfacht - für Production sollte man eine Library verwenden)

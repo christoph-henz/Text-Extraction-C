@@ -24,6 +24,12 @@ public:
     void addRibbon(const std::string &name);
     void addItemToRibbon(const std::string &ribbonName, const RibbonItem &item);
     
+    /// <summary>
+    /// Setzt die Sichtbarkeit eines Ribbons (Tab)
+    /// index: 0=Home, 1=Upload, 2=Extraktion, 3=AdminPanel, 4=Einstellungen, 5=Profil
+    /// </summary>
+    void setRibbonVisible(int index, bool visible);
+    
     void setHeight(float height) { 
         height_ = height;
         background_.setSize(sf::Vector2f(getWidth(), height_));
@@ -47,6 +53,7 @@ private:
         std::string name;
         char icon; // First letter for icon
         bool isOpen = false;
+        bool visible = true; // Kontrolliert ob Ribbon sichtbar ist
         std::vector<RibbonItem> items;
         bool hovered = false;
     };

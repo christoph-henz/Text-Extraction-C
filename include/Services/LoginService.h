@@ -50,6 +50,11 @@ public:
     static std::optional<LoginInfo> GetLoginInfo();
     
     /// <summary>
+    /// Holt die gespeicherten Credentials (username und hashed password)
+    /// </summary>
+    static std::pair<std::string, std::string> GetStoredCredentials();
+    
+    /// <summary>
     /// Speichert Login-Informationen lokal
     /// </summary>
     static void SaveLogin(const std::string& username, 

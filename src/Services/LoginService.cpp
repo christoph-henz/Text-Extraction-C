@@ -51,6 +51,11 @@ std::optional<LoginInfo> LoginService::GetLoginInfo()
     };
 }
 
+std::pair<std::string, std::string> LoginService::GetStoredCredentials()
+{
+    return {_username, _password};
+}
+
 void LoginService::SaveLogin(const std::string& username,
                             const std::string& email,
                             const std::string& role,

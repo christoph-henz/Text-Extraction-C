@@ -42,6 +42,9 @@ void Sidebar::draw(sf::RenderWindow &window)
         for (size_t i = 0; i < ribbons_.size(); ++i) {
             auto &ribbon = ribbons_[i];
             
+            // Überspringe unsichtbare Ribbons
+            if (!ribbon.visible) continue;
+            
             // Draw ribbon button background
             sf::RectangleShape ribbonBg(sf::Vector2f(width_ - 10.f, 30.f));
             ribbonBg.setPosition(5.f, yOffset);
@@ -78,6 +81,9 @@ void Sidebar::draw(sf::RenderWindow &window)
         for (size_t i = 0; i < ribbons_.size(); ++i) {
             auto &ribbon = ribbons_[i];
             
+            // Überspringe unsichtbare Ribbons
+            if (!ribbon.visible) continue;
+            
             // Draw icon button background
             sf::RectangleShape iconBg(sf::Vector2f(45.f, 45.f));
             iconBg.setPosition(7.f, yOffset);
@@ -105,6 +111,9 @@ void Sidebar::handleEvent(const sf::Event &event)
         int newHovered = -1;
         
         for (size_t i = 0; i < ribbons_.size(); ++i) {
+            auto &ribbon = ribbons_[i];
+            if (!ribbon.visible) continue; // Überspringe unsichtbare Ribbons
+            
             float itemHeight = isExpanded_ ? 35.f : 52.f;
             if (event.mouseMove.y >= yOffset && event.mouseMove.y < yOffset + itemHeight &&
                 event.mouseMove.x < getWidth()) {
@@ -123,14 +132,16 @@ void Sidebar::handleEvent(const sf::Event &event)
     // Handle ribbon clicks for expanding/collapsing
     if (event.type == sf::Event::MouseButtonPressed) {
         float yOffset = 65.f;
-        int ribbonIndex = 0;
         
-        for (auto &ribbon : ribbons_) {
+        for (size_t i = 0; i < ribbons_.size(); ++i) {
+            auto &ribbon = ribbons_[i];
+            if (!ribbon.visible) continue; // Überspringe unsichtbare Ribbons
+            
             float itemHeight = isExpanded_ ? 35.f : 52.f;
             if (event.mouseButton.y >= yOffset && event.mouseButton.y < yOffset + itemHeight &&
                 event.mouseButton.x < getWidth()) {
                 ribbon.isOpen = !ribbon.isOpen;
-                lastClickedRibbon_ = ribbonIndex;
+                lastClickedRibbon_ = i; // Verwende den echten Index
                 break;
             }
             yOffset += itemHeight;
@@ -144,7 +155,6 @@ void Sidebar::handleEvent(const sf::Event &event)
                     yOffset += 28.f;
                 }
             }
-            ++ribbonIndex;
         }
     }
 }
@@ -156,7 +166,7 @@ void Sidebar::toggle()
 
 void Sidebar::addRibbon(const std::string &name)
 {
-    ribbons_.push_back(Ribbon{name, name[0], false, {}, false});
+    ribbons_.push_back(Ribbon{name, name[0], false, true, {}, false});
 }
 
 void Sidebar::addItemToRibbon(const std::string &ribbonName, const RibbonItem &item)
@@ -166,6 +176,13 @@ void Sidebar::addItemToRibbon(const std::string &ribbonName, const RibbonItem &i
             ribbon.items.push_back(item);
             break;
         }
+    }
+}
+
+void Sidebar::setRibbonVisible(int index, bool visible)
+{
+    if (index >= 0 && index < static_cast<int>(ribbons_.size())) {
+        ribbons_[index].visible = visible;
     }
 }
 

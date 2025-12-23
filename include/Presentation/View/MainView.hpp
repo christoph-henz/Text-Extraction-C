@@ -7,6 +7,11 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <fstream>
+#include <codecvt>
+#include <locale>
+#include <thread>
+#include <chrono>
 
 #ifdef USE_SFML
 #include <SFML/Graphics.hpp>
@@ -14,12 +19,70 @@
 
 using namespace Presentation::ViewModel;
 
+// UTF-8 zu UTF-32 Konvertierungsfunktion für SFML
+inline sf::String ToSFMLString(const std::string& utf8String)
+{
+    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
+    try {
+        std::u32string utf32 = converter.from_bytes(utf8String);
+        // Konvertiere std::u32string zu std::basic_string<sf::Uint32>
+        std::basic_string<sf::Uint32> sfUtf32(utf32.begin(), utf32.end());
+        return sf::String(sfUtf32);
+    }
+    catch (...) {
+        // Fallback bei Conversion-Fehler
+        return sf::String(utf8String);
+    }
+}
+
+// Extrahiere "message" Feld aus JSON Response
+inline std::string ExtractMessageFromJSON(const std::string& json)
+{
+    size_t pos = json.find("\"message\":");
+    if (pos == std::string::npos) {
+        return json; // Fallback: ganze Response wenn kein message Feld
+    }
+    
+    pos = json.find("\"", pos + 10);
+    if (pos == std::string::npos) return json;
+    
+    size_t end = json.find("\"", pos + 1);
+    if (end == std::string::npos) return json;
+    
+    return json.substr(pos + 1, end - pos - 1);
+}
+
+// Text Wrapping für lange Nachrichten
+inline std::vector<std::string> WrapText(const std::string& text, size_t maxCharsPerLine = 60)
+{
+    std::vector<std::string> lines;
+    std::string currentLine;
+    std::istringstream stream(text);
+    std::string word;
+    
+    while (stream >> word) {
+        if ((currentLine + word).length() > maxCharsPerLine && !currentLine.empty()) {
+            lines.push_back(currentLine);
+            currentLine = word;
+        } else {
+            if (!currentLine.empty()) currentLine += " ";
+            currentLine += word;
+        }
+    }
+    
+    if (!currentLine.empty()) {
+        lines.push_back(currentLine);
+    }
+    
+    return lines;
+}
+
 void RunGui(Presentation::ViewModel::MainViewModel &vm)
 {
 #ifdef USE_SFML
-    // Initialize Services
-    Services::ApiService::Initialize("127.0.0.1", 5000);
+    // Initialize Services (LoginService MUSS vor ApiService initialisiert werden!)
     Services::LoginService::Initialize();
+    Services::ApiService::Initialize("127.0.0.1", 5000);
     
     // Check if user is already logged in
     bool userAlreadyLoggedIn = Services::LoginService::IsLoggedIn();
@@ -34,6 +97,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     auto sidebar = std::make_unique<UI::Sidebar>(font, 250.f, 700.f);
     
     // Add menu items to ribbons
+    /*
     sidebar->addItemToRibbon("Home", {"New Project", nullptr});
     sidebar->addItemToRibbon("Home", {"Open", nullptr});
     sidebar->addItemToRibbon("Upload", {"Upload File", nullptr});
@@ -46,13 +110,22 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     sidebar->addItemToRibbon("Einstellungen", {"About", nullptr});
     sidebar->addItemToRibbon("Profil", {"My Profile", nullptr});
     sidebar->addItemToRibbon("Profil", {"Logout", nullptr});
-    
+    */
+
     // API State
     std::string apiUrl = Services::ApiService::GetApiUrl();
     std::string apiResponse = "";
-    int activeTab = 0; // 0 = Home, 4 = Einstellungen, 5 = Profil
+    int activeTab = 0; // 0 = Home, 1 = Upload, 4 = Einstellungen, 5 = Profil
     bool showApiUrlInput = false;
     std::string urlInput = apiUrl;
+    
+    // Upload State
+    std::string selectedFilePath = "";
+    std::string uploadStatus = "";
+    double uploadProgress = 0.0; // 0.0 to 1.0
+    bool isUploading = false;
+    bool showUploadSuccess = false;
+    bool uploadButtonPressed = false; // Verhindert mehrfache Uploads beim Halten des Buttons
     
     // Login State
     std::string loginUsername = "";
@@ -74,6 +147,21 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     } else {
         std::cout << "Zeige Login-Formular" << std::endl;
     }
+    
+    // Setze Ribbon-Sichtbarkeit basierend auf Login-Status und Role
+    auto updateRibbonVisibility = [&]() {
+        bool isLoggedIn = Services::LoginService::IsLoggedIn();
+        bool isAdmin = (userInfo.role == "Administrator");
+        
+        // 0=Home (immer sichtbar), 1=Upload, 2=Extraktion, 3=AdminPanel, 4=Einstellungen, 5=Profil
+        sidebar->setRibbonVisible(0, true);      // Home - immer sichtbar
+        sidebar->setRibbonVisible(1, isLoggedIn); // Upload - nur wenn angemeldet
+        sidebar->setRibbonVisible(2, isLoggedIn); // Extraktion - nur wenn angemeldet
+        sidebar->setRibbonVisible(3, isAdmin);    // AdminPanel - nur wenn Administrator
+        sidebar->setRibbonVisible(4, true);       // Einstellungen - immer sichtbar
+        sidebar->setRibbonVisible(5, true);       // Profil - immer sichtbar
+    };
+    updateRibbonVisibility(); // Initial setzen
     
     while (window.isOpen()) {
         float sidebarWidth = sidebar->getWidth();
@@ -141,15 +229,19 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     // Perform login
                     Services::HttpResponse resp = Services::ApiService::Login(loginUsername, loginPassword);
                     if (resp.isSuccess) {
-                        // Save login info
-                        Services::LoginService::SaveLogin(loginUsername, resp.user_email, resp.user_role, "user");
-                        Services::ApiService::SetAuthCredentials(loginUsername, loginPassword);
+                        // Speichere das gehashte Passwort für Auth-Header
+                        std::string hashedPassword = Services::ApiService::HashPassword(loginPassword);
+                        std::cout << "Login erfolgreich. Speichere Credentials für Upload." << std::endl;
+                        Services::LoginService::SaveLogin(loginUsername, resp.user_email, resp.user_role, hashedPassword);
+                        // SetAuthCredentials mit Username und gehashtem Passwort
+                        Services::ApiService::SetAuthCredentials(loginUsername, hashedPassword);
                         auto info = Services::LoginService::GetLoginInfo();
                         if (info.has_value()) {
                             userInfo = info.value();
                         }
                         isLoginInputMode = false;
                         loginError = "";
+                        updateRibbonVisibility(); // Aktualisiere Sichtbarkeit nach Login
                     } else {
                         loginError = "Login failed: " + std::to_string(resp.statusCode);
                     }
@@ -164,6 +256,9 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     loginUsername = "";
                     loginPassword = "";
                     loginError = "";
+                    userInfo = {"Guest", "", "User", ""};
+                    updateRibbonVisibility(); // Aktualisiere Sichtbarkeit nach Logout
+                    activeTab = 0; // Gehe zurück zu Home
                 }
             }
         }
@@ -232,6 +327,206 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
             responseText.setFillColor(sf::Color(50, 50, 50));
             responseText.setPosition(sidebarWidth + 20.f, 180.f);
             window.draw(responseText);
+            
+        } else if (activeTab == 1) { // Upload - File Upload
+            sf::Text uploadTitle(ToSFMLString("Datei hochladen"), font, 20u);
+            uploadTitle.setFillColor(sf::Color::Black);
+            uploadTitle.setPosition(sidebarWidth + 20.f, 70.f);
+            window.draw(uploadTitle);
+            
+            // Datei auswählen Button
+            sf::RectangleShape selectBtn(sf::Vector2f(200.f, 40.f));
+            selectBtn.setPosition(sidebarWidth + 20.f, 120.f);
+            selectBtn.setFillColor(sf::Color(70, 130, 180));
+            window.draw(selectBtn);
+            
+            sf::Text selectText(ToSFMLString("Datei auswählen"), font, 14u);
+            selectText.setFillColor(sf::Color::White);
+            selectText.setPosition(sidebarWidth + 40.f, 130.f);
+            window.draw(selectText);
+            
+            // Dateiname anzeigen
+            if (!selectedFilePath.empty()) {
+                size_t lastSlash = selectedFilePath.find_last_of("/\\");
+                std::string fileName = (lastSlash != std::string::npos) ? selectedFilePath.substr(lastSlash + 1) : selectedFilePath;
+                
+                sf::Text fileLabel(ToSFMLString("Gewählte Datei:"), font, 12u);
+                fileLabel.setFillColor(sf::Color::Black);
+                fileLabel.setPosition(sidebarWidth + 20.f, 180.f);
+                window.draw(fileLabel);
+                
+                sf::Text fileNameText(fileName, font, 12u);
+                fileNameText.setFillColor(sf::Color(100, 100, 100));
+                fileNameText.setPosition(sidebarWidth + 150.f, 180.f);
+                window.draw(fileNameText);
+                
+                // Upload Button
+                sf::RectangleShape uploadBtn(sf::Vector2f(150.f, 40.f));
+                uploadBtn.setPosition(sidebarWidth + 20.f, 220.f);
+                uploadBtn.setFillColor(isUploading ? sf::Color(150, 150, 150) : sf::Color(50, 150, 50));
+                window.draw(uploadBtn);
+                
+                sf::Text uploadBtnText(ToSFMLString(isUploading ? "Lädt..." : "Hochladen"), font, 14u);
+                uploadBtnText.setFillColor(sf::Color::White);
+                uploadBtnText.setPosition(sidebarWidth + 40.f, 230.f);
+                window.draw(uploadBtnText);
+                
+                // Fortschrittsbalken
+                if (isUploading || uploadProgress > 0.0) {
+                    sf::Text progressLabel(ToSFMLString("Fortschritt:"), font, 12u);
+                    progressLabel.setFillColor(sf::Color::Black);
+                    progressLabel.setPosition(sidebarWidth + 20.f, 280.f);
+                    window.draw(progressLabel);
+                    
+                    // Hintergrund für Fortschrittsbalken
+                    sf::RectangleShape progressBg(sf::Vector2f(500.f, 30.f));
+                    progressBg.setPosition(sidebarWidth + 20.f, 310.f);
+                    progressBg.setFillColor(sf::Color(200, 200, 200));
+                    window.draw(progressBg);
+                    
+                    // Fortschrittsbalken
+                    float progressWidth = 500.f * uploadProgress;
+                    sf::RectangleShape progressBar(sf::Vector2f(progressWidth, 30.f));
+                    progressBar.setPosition(sidebarWidth + 20.f, 310.f);
+                    progressBar.setFillColor(sf::Color(50, 150, 50));
+                    window.draw(progressBar);
+                    
+                    // Prozenttext
+                    std::string percentText = std::to_string(static_cast<int>(uploadProgress * 100)) + "%";
+                    sf::Text percentDisplay(percentText, font, 12u);
+                    percentDisplay.setFillColor(sf::Color::Black);
+                    percentDisplay.setPosition(sidebarWidth + 250.f, 318.f);
+                    window.draw(percentDisplay);
+                }
+                
+                // Upload Status / Erfolg / Fehler - mit schöner Formatierung
+                if (showUploadSuccess || !uploadStatus.empty()) {
+                    // Extrahiere die Nachricht aus der Response
+                    std::string displayMessage;
+                    if (showUploadSuccess) {
+                        displayMessage = ToSFMLString("Datei erfolgreich hochgeladen!");
+                    } else {
+                        displayMessage = ExtractMessageFromJSON(uploadStatus);
+                    }
+                    
+                    // Wrapper für lange Texte
+                    auto wrappedLines = WrapText(displayMessage, 65);
+                    
+                    // Berechne Box-Größe
+                    float boxWidth = 550.f;
+                    float lineHeight = 20.f;
+                    float boxHeight = (wrappedLines.size() * lineHeight) + 30.f;
+                    float boxX = sidebarWidth + 20.f;
+                    float boxY = 360.f;
+                    
+                    // Zeichne Hintergrund-Box
+                    sf::RectangleShape messageBox(sf::Vector2f(boxWidth, boxHeight));
+                    messageBox.setPosition(boxX, boxY);
+                    messageBox.setFillColor(showUploadSuccess ? sf::Color(240, 255, 240) : sf::Color(255, 240, 240));
+                    messageBox.setOutlineColor(showUploadSuccess ? sf::Color(50, 150, 50) : sf::Color(200, 50, 50));
+                    messageBox.setOutlineThickness(2.f);
+                    window.draw(messageBox);
+                    
+                    // Zeichne Text zeilenweise
+                    float textY = boxY + 10.f;
+                    for (const auto& line : wrappedLines) {
+                        sf::Text lineText(ToSFMLString(line), font, 12u);
+                        lineText.setFillColor(showUploadSuccess ? sf::Color(50, 150, 50) : sf::Color(200, 50, 50));
+                        lineText.setPosition(boxX + 15.f, textY);
+                        window.draw(lineText);
+                        textY += lineHeight;
+                    }
+                }
+            }
+            
+            // Click Handler für "Datei auswählen" Button
+            if (event.type == sf::Event::MouseButtonPressed && !isUploading) {
+                if (event.mouseButton.x >= sidebarWidth + 20.f && event.mouseButton.x <= sidebarWidth + 220.f &&
+                    event.mouseButton.y >= 120.f && event.mouseButton.y <= 160.f) {
+                    // Öffne Datei-Dialog mit besserem Error-Handling
+                    std::string command;
+                    #ifdef _WIN32
+                        // Windows: PowerShell Datei-Dialog
+                        command = "powershell -Command \"[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.ShowDialog() | Out-Null; Write-Host $f.FileName\" > /tmp/selected_file.txt 2>/dev/null";
+                    #else
+                        // Linux/macOS: zenity - stderr zu /dev/null um GTK Warnings auszufiltern
+                        command = "zenity --file-selection --title='Datei auswählen' > /tmp/selected_file.txt 2>/dev/null";
+                    #endif
+                    
+                    int ret = system(command.c_str());
+                    std::cout << "File dialog exit code: " << ret << std::endl;
+                    
+                    // Kleine Verzögerung um sicherzustellen dass die Datei geschrieben ist
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    
+                    // Lese die ausgewählte Datei
+                    std::ifstream file("/tmp/selected_file.txt");
+                    if (file.is_open()) {
+                        std::getline(file, selectedFilePath);
+                        file.close();
+                        
+                        // Entferne alle Whitespace am Ende
+                        while (!selectedFilePath.empty() && 
+                               (selectedFilePath.back() == '\n' || 
+                                selectedFilePath.back() == '\r' || 
+                                selectedFilePath.back() == ' ')) {
+                            selectedFilePath.pop_back();
+                        }
+                        
+                        std::cout << "DEBUG: selectedFilePath nach Bereinigung: [" << selectedFilePath << "]" << std::endl;
+                        
+                        if (!selectedFilePath.empty()) {
+                            std::cout << "Datei ausgewählt: " << selectedFilePath << std::endl;
+                        } else {
+                            std::cout << "Keine Datei ausgewählt (leer)" << std::endl;
+                        }
+                    } else {
+                        std::cout << "Fehler beim Lesen von /tmp/selected_file.txt" << std::endl;
+                    }
+                }
+            }
+            
+            // Click Handler für "Hochladen" Button
+            if (event.type == sf::Event::MouseButtonPressed && !selectedFilePath.empty() && !isUploading && !uploadButtonPressed) {
+                if (event.mouseButton.x >= sidebarWidth + 20.f && event.mouseButton.x <= sidebarWidth + 170.f &&
+                    event.mouseButton.y >= 220.f && event.mouseButton.y <= 260.f) {
+                    uploadButtonPressed = true; // Markiere Button als gedrückt
+                    std::cout << "Upload Button geklickt. selectedFilePath: [" << selectedFilePath << "]" << std::endl;
+                    
+                    isUploading = true;
+                    showUploadSuccess = false;
+                    uploadStatus = "";
+                    uploadProgress = 0.0;
+                    
+                    if (selectedFilePath.empty()) {
+                        uploadStatus = "Fehler: Keine Datei ausgewählt";
+                        isUploading = false;
+                        std::cout << "Upload abgebrochen: selectedFilePath ist leer" << std::endl;
+                    } else {
+                        // Upload mit Progress-Callback
+                        Services::HttpResponse resp = Services::ApiService::UploadFile(selectedFilePath,
+                            [&uploadProgress](double progress) {
+                                uploadProgress = progress;
+                            });
+                        
+                        isUploading = false;
+                        if (resp.isSuccess) {
+                            showUploadSuccess = true;
+                            uploadStatus = "";
+                            std::cout << "Upload erfolgreich!" << std::endl;
+                        } else {
+                            showUploadSuccess = false;
+                            uploadStatus = "Fehler: " + resp.body;
+                            std::cout << "Upload fehlgeschlagen: " << resp.body << std::endl;
+                        }
+                    }
+                }
+            }
+            
+            // Reset uploadButtonPressed wenn Button losgelassen wird
+            if (event.type == sf::Event::MouseButtonReleased) {
+                uploadButtonPressed = false;
+            }
             
         } else if (activeTab == 4) { // Einstellungen - API URL Settings
             sf::Text settingsTitle("API Configuration", font, 20u);

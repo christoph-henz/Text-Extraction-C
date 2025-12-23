@@ -80,6 +80,11 @@ public:
     /// </summary>
     static void ClearAuthCredentials();
     
+    /// <summary>
+    /// SHA256-Hash für Passwort
+    /// </summary>
+    static std::string HashPassword(const std::string& password);
+    
 private:
     static std::string _baseUrl;
     static std::string _authUsername;
@@ -89,11 +94,6 @@ private:
     /// Erstellt einen Authorization Header (Basic Auth)
     /// </summary>
     static std::string GetAuthHeader();
-    
-    /// <summary>
-    /// SHA256-Hash für Passwort
-    /// </summary>
-    static std::string HashPassword(const std::string& password);
     
     /// <summary>
     /// Konvertiert Bytes zu Hex-String
