@@ -164,18 +164,15 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     bool uploadButtonPressed = false; // Verhindert mehrfache Uploads beim Halten des Buttons
     
     // Extraction State
-    struct DocumentInfo {
-        std::string fileId;
-        std::string fileName;
-        std::string uploadDate;
-        std::string fileSize;
-    };
-    std::vector<DocumentInfo> documents;
+    std::string extractionSelectedFileId = "";
+    std::string extractionSelectedFileName = "";
+    std::string extractionSelectedFileSize = "";
+    std::string extractionSelectedUploadDate = "";
     bool showExtractionDetail = false;
-    DocumentInfo selectedDocument{"", "", "", ""};
     std::string extractedText = "";
     bool documentsLoaded = false;
     bool loadingDocuments = false;
+    std::vector<std::pair<std::string, std::string>> myDocuments;  // fileId, fileName
     bool isExtracting = false;
     std::string extractionStatus = "";
     bool extractionCompleted = false;
@@ -184,6 +181,66 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     float textScrollOffset = 0.f;  // Für scrollbare Text-Box
     bool isDraggingScrollBar = false;
     float maxScrollOffset = 0.f;
+    
+    // Admin Page State
+    int adminSubTab = 0;  // 0 = Statistiken, 1 = Benutzer, 2 = Dokumente, 3 = Extraktionen
+    
+    // Statistics State
+    std::string statisticsData = "";
+    bool statisticsLoaded = false;
+    bool loadingStatistics = false;
+    
+    // Users State
+    struct UserInfo {
+        std::string userId;
+        std::string username;
+        std::string email;
+        std::string role;
+        std::string createdAt;
+        std::string lastLogin;
+        bool isActive;
+    };
+    std::vector<UserInfo> adminUsers;
+    bool usersLoaded = false;
+    bool loadingUsers = false;
+    bool showCreateUserForm = false;
+    bool showEditUserForm = false;
+    std::string editUsername = "";
+    std::string editUserId = "";
+    std::string newUsername = "";
+    std::string newEmail = "";
+    std::string newPassword = "";
+    std::string newRole = "User";
+    std::string userFormMessage = "";
+    bool userFormSuccess = false;
+    bool usernameFocusedForm = false;
+    bool emailFocusedForm = false;
+    bool passwordFocusedForm = false;
+    
+    // Documents State
+    struct DocumentInfo {
+        std::string fileId;
+        std::string fileName;
+        std::string uploadedBy;
+        std::string uploadedAt;
+        std::string fileSize;
+    };
+    std::vector<DocumentInfo> adminDocuments;
+    bool adminDocsLoaded = false;
+    bool adminDocsLoading = false;
+    
+    // Extractions State
+    struct ExtractionInfo {
+        std::string extractionId;
+        std::string fileName;
+        std::string extractionMethod;
+        std::string completedAt;
+        std::string status;
+        std::string uploadedBy;
+    };
+    std::vector<ExtractionInfo> adminExtractions;
+    bool adminExtrsLoaded = false;
+    bool adminExtrsLoading = false;
     
     // Login State
     std::string loginUsername = "";
@@ -317,6 +374,178 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     userInfo = {"Guest", "", "User", ""};
                     updateRibbonVisibility(); // Aktualisiere Sichtbarkeit nach Logout
                     activeTab = 0; // Gehe zurück zu Home
+                }
+            }
+            
+            // Handle user form input (Create and Edit)
+            if (activeTab == 3 && adminSubTab == 1 && (showCreateUserForm || showEditUserForm) && event.type == sf::Event::TextEntered) {
+                if (usernameFocusedForm && !showEditUserForm) { // Only allow edit username in create form
+                    if (event.text.unicode == 8 && !newUsername.empty()) { // Backspace
+                        newUsername.pop_back();
+                    } else if (event.text.unicode >= 32 && event.text.unicode < 127) {
+                        newUsername += static_cast<char>(event.text.unicode);
+                    }
+                } else if (emailFocusedForm) {
+                    if (event.text.unicode == 8 && !newEmail.empty()) { // Backspace
+                        newEmail.pop_back();
+                    } else if (event.text.unicode >= 32 && event.text.unicode < 127) {
+                        newEmail += static_cast<char>(event.text.unicode);
+                    }
+                } else if (passwordFocusedForm) {
+                    if (event.text.unicode == 8 && !newPassword.empty()) { // Backspace
+                        newPassword.pop_back();
+                    } else if (event.text.unicode >= 32 && event.text.unicode < 127) {
+                        newPassword += static_cast<char>(event.text.unicode);
+                    }
+                }
+            }
+            
+            // Handle user form field focus and button clicks (Create and Edit)
+            if (activeTab == 3 && adminSubTab == 1 && (showCreateUserForm || showEditUserForm) && event.type == sf::Event::MouseButtonPressed) {
+                // Focus username field (nur im Create-Mode)
+                if (!showEditUserForm && event.mouseButton.x >= sidebarWidth + 170.f && event.mouseButton.x <= sidebarWidth + 470.f &&
+                    event.mouseButton.y >= 275.f && event.mouseButton.y <= 305.f) {
+                    usernameFocusedForm = true;
+                    emailFocusedForm = false;
+                    passwordFocusedForm = false;
+                }
+                // Focus email field
+                else if (event.mouseButton.x >= sidebarWidth + 170.f && event.mouseButton.x <= sidebarWidth + 470.f &&
+                         event.mouseButton.y >= 345.f && event.mouseButton.y <= 375.f) {
+                    usernameFocusedForm = false;
+                    emailFocusedForm = true;
+                    passwordFocusedForm = false;
+                }
+                // Focus password field
+                else if (event.mouseButton.x >= sidebarWidth + 500.f && event.mouseButton.x <= sidebarWidth + 700.f &&
+                         event.mouseButton.y >= 275.f && event.mouseButton.y <= 305.f) {
+                    usernameFocusedForm = false;
+                    emailFocusedForm = false;
+                    passwordFocusedForm = true;
+                }
+                // Role button click
+                else if (event.mouseButton.x >= sidebarWidth + 500.f && event.mouseButton.x <= sidebarWidth + 700.f &&
+                         event.mouseButton.y >= 345.f && event.mouseButton.y <= 375.f) {
+                    newRole = (newRole == "Administrator") ? "User" : "Administrator";
+                }
+                // Create/Save button
+                else if (event.mouseButton.x >= sidebarWidth + 170.f && event.mouseButton.x <= sidebarWidth + 270.f &&
+                         event.mouseButton.y >= 450.f && event.mouseButton.y <= 480.f) {
+                    if (showCreateUserForm) {
+                        // Create new user
+                        if (!newUsername.empty() && !newEmail.empty() && !newPassword.empty()) {
+                            std::string createUserJson = "{\"username\":\"" + newUsername + "\",\"email\":\"" + newEmail + 
+                                                       "\",\"password\":\"" + newPassword + "\",\"role\":\"" + newRole + "\"}";
+                            Services::HttpResponse resp = Services::ApiService::Post("Admin/users", createUserJson);
+                            
+                            if (resp.isSuccess) {
+                                userFormSuccess = true;
+                                userFormMessage = "Benutzer erfolgreich erstellt!";
+                                newUsername = "";
+                                newEmail = "";
+                                newPassword = "";
+                                newRole = "User";
+                                usersLoaded = false; // Reload users list
+                                std::this_thread::sleep_for(std::chrono::seconds(2));
+                                showCreateUserForm = false;
+                            } else {
+                                userFormSuccess = false;
+                                userFormMessage = ExtractMessageFromJSON(resp.body);
+                            }
+                        } else {
+                            userFormSuccess = false;
+                            userFormMessage = "Alle Felder sind erforderlich!";
+                        }
+                    } else if (showEditUserForm) {
+                        // Update existing user
+                        if (!newEmail.empty()) {
+                            std::string updateUserJson = "{\"email\":\"" + newEmail + "\",\"role\":\"" + newRole + "\"";
+                            if (!newPassword.empty()) {
+                                updateUserJson += ",\"newPassword\":\"" + newPassword;
+                            }
+                            updateUserJson += "}";
+                            
+                            Services::HttpResponse resp = Services::ApiService::Put("Admin/users/" + editUserId, updateUserJson);
+                            
+                            if (resp.isSuccess) {
+                                userFormSuccess = true;
+                                userFormMessage = "Benutzer erfolgreich aktualisiert!";
+                                newUsername = "";
+                                newEmail = "";
+                                newPassword = "";
+                                newRole = "User";
+                                editUsername = "";
+                                editUserId = "";
+                                usersLoaded = false; // Reload users list
+                                std::this_thread::sleep_for(std::chrono::seconds(2));
+                                showEditUserForm = false;
+                            } else {
+                                userFormSuccess = false;
+                                userFormMessage = ExtractMessageFromJSON(resp.body);
+                            }
+                        } else {
+                            userFormSuccess = false;
+                            userFormMessage = "E-Mail ist erforderlich!";
+                        }
+                    }
+                }
+                // Cancel button
+                else if (event.mouseButton.x >= sidebarWidth + 290.f && event.mouseButton.x <= sidebarWidth + 390.f &&
+                         event.mouseButton.y >= 450.f && event.mouseButton.y <= 480.f) {
+                    showCreateUserForm = false;
+                    showEditUserForm = false;
+                    newUsername = "";
+                    newEmail = "";
+                    newPassword = "";
+                    newRole = "User";
+                    editUsername = "";
+                    editUserId = "";
+                    userFormMessage = "";
+                }
+            }
+            
+            // Handle users list interactions (toggle button, edit button)
+            if (activeTab == 3 && adminSubTab == 1 && !showCreateUserForm && !showEditUserForm && event.type == sf::Event::MouseButtonPressed) {
+                float userY = 190.f;
+                for (size_t i = 0; i < adminUsers.size(); ++i) {
+                    float itemY = userY + (i * 75.f);
+                    if (itemY > 650.f) break;
+                    
+                    // Click handler for toggle button (Activate/Deactivate)
+                    if (event.mouseButton.x >= sidebarWidth + 580.f && event.mouseButton.x <= sidebarWidth + 670.f &&
+                        event.mouseButton.y >= itemY + 20.f && event.mouseButton.y <= itemY + 50.f) {
+                        std::string endpoint = adminUsers[i].isActive ? 
+                            "Admin/users/" + adminUsers[i].userId + "/deactivate" :
+                            "Admin/users/" + adminUsers[i].userId + "/activate";
+                        std::cout << "DEBUG: Toggle user - endpoint: " << endpoint << ", userId: [" << adminUsers[i].userId << "]" << std::endl;
+                        Services::HttpResponse resp = Services::ApiService::Post(endpoint, "{}");
+                        std::cout << "DEBUG: Response - status: " << resp.statusCode << ", success: " << resp.isSuccess << std::endl;
+                        if (resp.isSuccess) {
+                            adminUsers[i].isActive = !adminUsers[i].isActive;
+                        }
+                        break; // Nur einen Button pro Event handhaben
+                    }
+                    
+                    // Click handler for edit button
+                    if (event.mouseButton.x >= sidebarWidth + 690.f && event.mouseButton.x <= sidebarWidth + 830.f &&
+                        event.mouseButton.y >= itemY + 20.f && event.mouseButton.y <= itemY + 50.f) {
+                        showEditUserForm = true;
+                        editUsername = adminUsers[i].username;
+                        editUserId = adminUsers[i].userId;
+                        newEmail = adminUsers[i].email;
+                        newRole = adminUsers[i].role;
+                        newPassword = "";
+                        userFormMessage = "";
+                        break; // Nur einen Button pro Event handhaben
+                    }
+                }
+            }
+            
+            // Handle create user button click
+            if (activeTab == 3 && adminSubTab == 1 && !showCreateUserForm && !showEditUserForm && event.type == sf::Event::MouseButtonPressed) {
+                if (event.mouseButton.x >= sidebarWidth + 750.f && event.mouseButton.x <= sidebarWidth + 930.f &&
+                    event.mouseButton.y >= 135.f && event.mouseButton.y <= 170.f) {
+                    showCreateUserForm = true;
                 }
             }
         }
@@ -603,7 +832,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     //std::cout << "Extraction API Response Body: " << resp.body << std::endl;
                     
                     if (resp.isSuccess && !resp.body.empty()) {
-                        documents.clear();
+                        myDocuments.clear();
                         // Parse JSON Array - vereinfacht für [{fileId, fileName, uploadDate, fileSize}, ...]
                         size_t pos = 0;
                         int docCount = 0;
@@ -613,16 +842,13 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                             
                             std::string objStr = resp.body.substr(pos, endPos - pos + 1);
                             
-                            DocumentInfo doc;
-                            doc.fileId = ExtractJsonField(objStr, "id");
-                            doc.fileName = ExtractJsonField(objStr, "fileName");
-                            doc.uploadDate = ExtractJsonField(objStr, "uploadedAt");
-                            doc.fileSize = ExtractJsonField(objStr, "fileSize");
+                            std::string fileId = ExtractJsonField(objStr, "id");
+                            std::string fileName = ExtractJsonField(objStr, "fileName");
                             
-                            if (!doc.fileId.empty()) {
-                                documents.push_back(doc);
+                            if (!fileId.empty()) {
+                                myDocuments.push_back({fileId, fileName});
                                 docCount++;
-                                std::cout << "Dokument " << docCount << " geladen: " << doc.fileName << " (ID: " << doc.fileId << ")" << std::endl;
+                                std::cout << "Dokument " << docCount << " geladen: " << fileName << " (ID: " << fileId << ")" << std::endl;
                             }
                             
                             pos = endPos + 1;
@@ -637,8 +863,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 
                 // Zeichne Dokumentenliste
                 float docY = 120.f;
-                for (size_t i = 0; i < documents.size(); ++i) {
-                    const auto& doc = documents[i];
+                for (size_t i = 0; i < myDocuments.size(); ++i) {
+                    const auto& doc = myDocuments[i];
                     
                     // Document Item Box (größer für Button)
                     sf::RectangleShape docBox(sf::Vector2f(900.f, 70.f));
@@ -649,7 +875,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     window.draw(docBox);
                     
                     // Dateiname (größer machen) - mit Truncation
-                    std::string displayName = doc.fileName;
+                    std::string displayName = doc.second;
                     if (displayName.length() > 50) {
                         displayName = displayName.substr(0, 47) + "...";
                     }
@@ -659,10 +885,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     window.draw(docNameText);
                     
                     // Datum und Größe - mit Truncation
-                    std::string metaDisplay = "Upload: ";
-                    std::string dateOnly = doc.uploadDate.length() > 19 ? 
-                        doc.uploadDate.substr(0, 19) : doc.uploadDate;
-                    metaDisplay += dateOnly + " | Größe: " + doc.fileSize + " B";
+                    std::string metaDisplay = "Upload: Klicke zum Öffnen";
                     if (metaDisplay.length() > 80) {
                         metaDisplay = metaDisplay.substr(0, 77) + "...";
                     }
@@ -688,7 +911,10 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     if (event.type == sf::Event::MouseButtonPressed) {
                         if (event.mouseButton.x >= sidebarWidth + 800.f && event.mouseButton.x <= sidebarWidth + 910.f &&
                             event.mouseButton.y >= docY + 15.f && event.mouseButton.y <= docY + 55.f) {
-                            selectedDocument = doc;
+                            extractionSelectedFileId = doc.first;
+                            extractionSelectedFileName = doc.second;
+                            extractionSelectedFileSize = "";
+                            extractionSelectedUploadDate = "";
                             extractedText = "";
                             extractionStatus = "";
                             extractionCompleted = false;
@@ -698,7 +924,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                             showExtractionDetail = true;
                             
                             // Lade vorhandene Extraktion vom Server
-                            std::string extractionUrl = "Extraction/result/" + doc.fileId;
+                            std::string extractionUrl = "Extraction/result/" + doc.first;
+
                             Services::HttpResponse resp = Services::ApiService::Get(extractionUrl);
                             
                             if (resp.isSuccess && !resp.body.empty()) {
@@ -710,7 +937,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                                 if (!extractedText.empty()) {
                                     extractionStatus = "Vorhandene Extraktion geladen";
                                     extractionCompleted = true;
-                                    std::cout << "Vorhandene Extraktion geladen für: " << doc.fileName << std::endl;
+                                    std::cout << "Vorhandene Extraktion geladen für: " << extractionSelectedFileName << std::endl;
                                     std::cout << "ExtractionMethod: " << extractionMethod << std::endl;
                                     std::cout << "CompletedAt: " << completedAt << std::endl;
                                 } else {
@@ -721,18 +948,17 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                                 extractedText = "";
                                 extractionStatus = "";
                                 extractionCompleted = false;
-                                std::cout << "Keine vorhandene Extraktion für: " << doc.fileName << " (Status: " << resp.statusCode << ")" << std::endl;
+                                std::cout << "Keine vorhandene Extraktion für: " << extractionSelectedFileName << " (Status: " << resp.statusCode << ")" << std::endl;
                             }
                             
-                            std::cout << "Extraction Detail für: " << doc.fileName << " (ID: " << doc.fileId << ")" << std::endl;
+                            std::cout << "Extraction Detail für: " << extractionSelectedFileName << " (ID: " << extractionSelectedFileId << ")" << std::endl;
                         }
                     }
                     
-                    docY += 85.f;
+                docY += 85.f;
                 }
-                
                 // "Keine Dokumente" Nachricht
-                if (documents.empty() && documentsLoaded) {
+                if (myDocuments.empty() && documentsLoaded) {
                     sf::Text noDocsText(ToSFMLString("Keine hochgeladenen Dokumente vorhanden"), font, 14u);
                     noDocsText.setFillColor(sf::Color(150, 150, 150));
                     noDocsText.setPosition(sidebarWidth + 20.f, 150.f);
@@ -740,7 +966,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 }
             } else {
                 // === EXTRACTION DETAIL VIEW ===
-                sf::Text detailTitle(ToSFMLString("Extraktion: " + selectedDocument.fileName), font, 18u);
+                sf::Text detailTitle(ToSFMLString("Extraktion: " + extractionSelectedFileName), font, 18u);
                 detailTitle.setFillColor(sf::Color::Black);
                 detailTitle.setPosition(sidebarWidth + 20.f, 70.f);
                 window.draw(detailTitle);
@@ -787,7 +1013,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                         extractionCompleted = false;
                         
                         // POST Request: /api/Extraction/{documentId}
-                        std::string extractionUrl = "Extraction/" + selectedDocument.fileId;
+                        std::string extractionUrl = "Extraction/" + extractionSelectedFileId;
+
                         std::string jsonBody = R"({
                             "enableOCR": false,
                             "language": "de",
@@ -803,7 +1030,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                             extractionStatus = "Extraktion erfolgreich!";
                             extractedText = resp.body;
                             extractionCompleted = true;
-                            std::cout << "Extraction erfolgreich für: " << selectedDocument.fileName << std::endl;
+                            std::cout << "Extraction erfolgreich für: " << extractionSelectedFileName << std::endl;
                             std::cout << "Response: " << resp.body << std::endl;
                         } else {
                             extractionStatus = "Fehler bei Extraktion: Status " + std::to_string(resp.statusCode);
@@ -830,7 +1057,7 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 docNameLabel.setPosition(sidebarWidth + 30.f, 170.f);
                 window.draw(docNameLabel);
                 
-                sf::Text docNameValue(ToSFMLString(selectedDocument.fileName), font, 11u);
+                sf::Text docNameValue(ToSFMLString(extractionSelectedFileName), font, 11u);
                 docNameValue.setFillColor(sf::Color::Black);
                 docNameValue.setPosition(sidebarWidth + 90.f, 170.f);
                 window.draw(docNameValue);
@@ -841,8 +1068,8 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 docDateLabel.setPosition(sidebarWidth + 450.f, 170.f);
                 window.draw(docDateLabel);
                 
-                std::string displayUploadDate = selectedDocument.uploadDate.length() > 19 ? 
-                    selectedDocument.uploadDate.substr(0, 19) : selectedDocument.uploadDate;
+                std::string displayUploadDate = extractionSelectedUploadDate.length() > 19 ? 
+                    extractionSelectedUploadDate.substr(0, 19) : extractionSelectedUploadDate;
                 sf::Text docDateValue(ToSFMLString(displayUploadDate), font, 11u);
                 docDateValue.setFillColor(sf::Color::Black);
                 docDateValue.setPosition(sidebarWidth + 530.f, 170.f);
@@ -854,10 +1081,11 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                 docSizeLabel.setPosition(sidebarWidth + 30.f, 190.f);
                 window.draw(docSizeLabel);
                 
-                sf::Text docSizeValue(ToSFMLString(selectedDocument.fileSize + " Bytes"), font, 11u);
+                sf::Text docSizeValue(ToSFMLString(extractionSelectedFileSize + " Bytes"), font, 11u);
                 docSizeValue.setFillColor(sf::Color::Black);
                 docSizeValue.setPosition(sidebarWidth + 110.f, 190.f);
                 window.draw(docSizeValue);
+
                 
                 // Extracted Text Box Header
                 sf::Text textBoxHeader(ToSFMLString("Extrahierter Text:"), font, 13u);
@@ -1042,6 +1270,727 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
                     statsLabel.setPosition(sidebarWidth + 30.f, textBoxY + textBoxHeight + 10.f);
                     window.draw(statsLabel);
                 }
+            }
+            
+        } else if (activeTab == 3) { // Admin Panel - Verwaltung
+            // Horizontales Menü für Admin-Sektionen
+            std::vector<std::string> adminTabs = {"Statistiken", "Benutzer", "Dokumente", "Extraktionen"};
+            float tabWidth = 180.f;
+            float tabHeight = 40.f;
+            
+            sf::RectangleShape tabMenuBackground(sf::Vector2f(sidebarWidth + 900.f - (sidebarWidth + 20.f), tabHeight));
+            tabMenuBackground.setPosition(sidebarWidth + 20.f, 70.f);
+            tabMenuBackground.setFillColor(sf::Color(235, 235, 235));
+            tabMenuBackground.setOutlineColor(sf::Color(150, 150, 150));
+            tabMenuBackground.setOutlineThickness(1.f);
+            window.draw(tabMenuBackground);
+            
+            for (int i = 0; i < (int)adminTabs.size(); ++i) {
+                float tabX = sidebarWidth + 20.f + (i * tabWidth);
+                
+                // Tab Button
+                sf::RectangleShape tabBtn(sf::Vector2f(tabWidth - 2.f, tabHeight));
+                tabBtn.setPosition(tabX, 70.f);
+                tabBtn.setFillColor(adminSubTab == i ? sf::Color(70, 130, 180) : sf::Color(200, 200, 200));
+                tabBtn.setOutlineColor(sf::Color(100, 100, 100));
+                tabBtn.setOutlineThickness(1.f);
+                window.draw(tabBtn);
+                
+                // Tab Label
+                sf::Text tabLabel(ToSFMLString(adminTabs[i]), font, 12u);
+                tabLabel.setFillColor(adminSubTab == i ? sf::Color::White : sf::Color::Black);
+                tabLabel.setPosition(tabX + 15.f, 78.f);
+                window.draw(tabLabel);
+                
+                // Click Handler
+                if (event.type == sf::Event::MouseButtonPressed) {
+                    if (event.mouseButton.x >= tabX && event.mouseButton.x <= tabX + tabWidth &&
+                        event.mouseButton.y >= 70.f && event.mouseButton.y <= 110.f) {
+                        adminSubTab = i;
+                    }
+                }
+            }
+            
+            // Content Area basierend auf adminSubTab
+            if (adminSubTab == 0) {
+                // === STATISTIKEN ===
+                sf::Text statsTitle(ToSFMLString("Statistiken"), font, 18u);
+                statsTitle.setFillColor(sf::Color::Black);
+                statsTitle.setPosition(sidebarWidth + 20.f, 130.f);
+                window.draw(statsTitle);
+                
+                // Lade Statistics beim ersten Mal
+                if (!statisticsLoaded && !loadingStatistics) {
+                    loadingStatistics = true;
+                    Services::HttpResponse resp = Services::ApiService::Get("Admin/statistics");
+                    if (resp.isSuccess && !resp.body.empty()) {
+                        statisticsData = resp.body;
+                        statisticsLoaded = true;
+                        std::cout << "Statistics geladen:" << std::endl << statisticsData << std::endl;
+                    } else {
+                        statisticsData = "Fehler beim Laden der Statistiken (Status: " + std::to_string(resp.statusCode) + ")";
+                        statisticsLoaded = true;
+                        std::cout << "Fehler beim Laden der Statistics. Status: " << resp.statusCode << std::endl;
+                    }
+                    loadingStatistics = false;
+                }
+                
+                sf::RectangleShape statsBox(sf::Vector2f(900.f, 500.f));
+                statsBox.setPosition(sidebarWidth + 20.f, 170.f);
+                statsBox.setFillColor(sf::Color(250, 250, 250));
+                statsBox.setOutlineColor(sf::Color(180, 180, 180));
+                statsBox.setOutlineThickness(1.f);
+                window.draw(statsBox);
+                
+                if (statisticsLoaded) {
+                    // === USERS PANEL ===
+                    int totalUsers = std::stoi(ExtractJsonField(statisticsData, "total"));
+                    int activeUsers = std::stoi(ExtractJsonField(statisticsData, "active"));
+                    int inactiveUsers = std::stoi(ExtractJsonField(statisticsData, "inactive"));
+                    
+                    sf::RectangleShape usersPanel(sf::Vector2f(280.f, 120.f));
+                    usersPanel.setPosition(sidebarWidth + 30.f, 180.f);
+                    usersPanel.setFillColor(sf::Color(220, 245, 220));
+                    usersPanel.setOutlineColor(sf::Color(100, 150, 100));
+                    usersPanel.setOutlineThickness(1.f);
+                    window.draw(usersPanel);
+                    
+                    sf::Text usersLabel(ToSFMLString("Benutzer"), font, 13u);
+                    usersLabel.setFillColor(sf::Color::Black);
+                    usersLabel.setPosition(sidebarWidth + 40.f, 190.f);
+                    window.draw(usersLabel);
+                    
+                    std::string userStats = "Gesamt: " + std::to_string(totalUsers) + " | Aktiv: " + std::to_string(activeUsers) + " | Inaktiv: " + std::to_string(inactiveUsers);
+                    sf::Text userStatsText(ToSFMLString(userStats), font, 11u);
+                    userStatsText.setFillColor(sf::Color(50, 100, 50));
+                    userStatsText.setPosition(sidebarWidth + 40.f, 215.f);
+                    window.draw(userStatsText);
+                    
+                    // === DOCUMENTS PANEL ===
+                    std::string docTotalStr = ExtractJsonField(statisticsData, "\"documents\":{\"total\":");
+                    if (docTotalStr.empty()) {
+                        size_t pos = statisticsData.find("\"documents\"");
+                        if (pos != std::string::npos) {
+                            size_t bracketPos = statisticsData.find("{", pos);
+                            if (bracketPos != std::string::npos) {
+                                size_t totalPos = statisticsData.find("\"total\":", bracketPos);
+                                if (totalPos != std::string::npos) {
+                                    size_t commaPos = statisticsData.find(",", totalPos);
+                                    docTotalStr = statisticsData.substr(totalPos + 8, commaPos - totalPos - 8);
+                                }
+                            }
+                        }
+                    }
+                    int docTotal = docTotalStr.empty() ? 0 : std::stoi(docTotalStr);
+                    
+                    sf::RectangleShape docsPanel(sf::Vector2f(280.f, 120.f));
+                    docsPanel.setPosition(sidebarWidth + 330.f, 180.f);
+                    docsPanel.setFillColor(sf::Color(220, 235, 255));
+                    docsPanel.setOutlineColor(sf::Color(100, 130, 200));
+                    docsPanel.setOutlineThickness(1.f);
+                    window.draw(docsPanel);
+                    
+                    sf::Text docsLabel(ToSFMLString("Dokumente"), font, 13u);
+                    docsLabel.setFillColor(sf::Color::Black);
+                    docsLabel.setPosition(sidebarWidth + 340.f, 190.f);
+                    window.draw(docsLabel);
+                    
+                    std::string docStats = "Gesamt: " + std::to_string(docTotal) + " Dateien";
+                    sf::Text docStatsText(ToSFMLString(docStats), font, 11u);
+                    docStatsText.setFillColor(sf::Color(50, 80, 150));
+                    docStatsText.setPosition(sidebarWidth + 340.f, 215.f);
+                    window.draw(docStatsText);
+                    
+                    // === EXTRACTIONS PANEL ===
+                    std::string extrTotalStr = ExtractJsonField(statisticsData, "\"extractions\":{\"total\":");
+                    if (extrTotalStr.empty()) {
+                        size_t pos = statisticsData.find("\"extractions\"");
+                        if (pos != std::string::npos) {
+                            size_t bracketPos = statisticsData.find("{", pos);
+                            if (bracketPos != std::string::npos) {
+                                size_t totalPos = statisticsData.find("\"total\":", bracketPos);
+                                if (totalPos != std::string::npos) {
+                                    size_t commaPos = statisticsData.find(",", totalPos);
+                                    extrTotalStr = statisticsData.substr(totalPos + 8, commaPos - totalPos - 8);
+                                }
+                            }
+                        }
+                    }
+                    int extrTotal = extrTotalStr.empty() ? 0 : std::stoi(extrTotalStr);
+                    
+                    sf::RectangleShape extrsPanel(sf::Vector2f(280.f, 120.f));
+                    extrsPanel.setPosition(sidebarWidth + 630.f, 180.f);
+                    extrsPanel.setFillColor(sf::Color(255, 240, 220));
+                    extrsPanel.setOutlineColor(sf::Color(200, 150, 100));
+                    extrsPanel.setOutlineThickness(1.f);
+                    window.draw(extrsPanel);
+                    
+                    sf::Text extrsLabel(ToSFMLString("Extraktionen"), font, 13u);
+                    extrsLabel.setFillColor(sf::Color::Black);
+                    extrsLabel.setPosition(sidebarWidth + 640.f, 190.f);
+                    window.draw(extrsLabel);
+                    
+                    std::string extrStats = "Gesamt: " + std::to_string(extrTotal);
+                    sf::Text extrStatsText(ToSFMLString(extrStats), font, 11u);
+                    extrStatsText.setFillColor(sf::Color(150, 100, 50));
+                    extrStatsText.setPosition(sidebarWidth + 640.f, 215.f);
+                    window.draw(extrStatsText);
+                    
+                    // === RECENT ACTIVITY ===
+                    sf::Text activityLabel(ToSFMLString("Letzte Aktivitäten:"), font, 12u);
+                    activityLabel.setFillColor(sf::Color::Black);
+                    activityLabel.setPosition(sidebarWidth + 30.f, 320.f);
+                    window.draw(activityLabel);
+                    
+                    sf::RectangleShape activityBox(sf::Vector2f(900.f, 140.f));
+                    activityBox.setPosition(sidebarWidth + 20.f, 350.f);
+                    activityBox.setFillColor(sf::Color(245, 245, 245));
+                    activityBox.setOutlineColor(sf::Color(180, 180, 180));
+                    activityBox.setOutlineThickness(1.f);
+                    window.draw(activityBox);
+                    
+                    // Parse and display recent activity
+                    size_t activityPos = statisticsData.find("\"recentActivity\"");
+                    if (activityPos != std::string::npos) {
+                        size_t arrayStart = statisticsData.find("[", activityPos);
+                        if (arrayStart != std::string::npos) {
+                            float activityY = 360.f;
+                            int activityCount = 0;
+                            for (int i = 0; i < 3 && activityCount < 3; ++i) {
+                                size_t objStart = statisticsData.find("{", arrayStart);
+                                if (objStart == std::string::npos || objStart > activityPos + 500) break;
+                                
+                                size_t objEnd = statisticsData.find("}", objStart);
+                                if (objEnd == std::string::npos) break;
+                                
+                                std::string objStr = statisticsData.substr(objStart, objEnd - objStart + 1);
+                                
+                                std::string actType = ExtractJsonField(objStr, "type");
+                                std::string fileName = ExtractJsonField(objStr, "fileName");
+                                std::string uploadedBy = ExtractJsonField(objStr, "uploadedBy");
+                                std::string timestamp = ExtractJsonField(objStr, "timestamp");
+                                
+                                if (timestamp.length() > 19) {
+                                    timestamp = timestamp.substr(0, 19);
+                                }
+                                
+                                std::string activityLine = actType + ": " + fileName + " by " + uploadedBy + " at " + timestamp;
+                                if (activityLine.length() > 80) {
+                                    activityLine = activityLine.substr(0, 77) + "...";
+                                }
+                                
+                                sf::Text activityText(ToSFMLString(activityLine), font, 10u);
+                                activityText.setFillColor(sf::Color(80, 80, 80));
+                                activityText.setPosition(sidebarWidth + 30.f, activityY);
+                                window.draw(activityText);
+                                
+                                activityY += 20.f;
+                                arrayStart = objEnd + 1;
+                                activityCount++;
+                            }
+                        }
+                    }
+                } else {
+                    sf::Text placeholderStats(ToSFMLString("Lade Statistiken..."), font, 14u);
+                    placeholderStats.setFillColor(sf::Color(150, 150, 150));
+                    placeholderStats.setPosition(sidebarWidth + 40.f, 250.f);
+                    window.draw(placeholderStats);
+                }
+                
+            } else if (adminSubTab == 1) {
+                // === BENUTZER ===
+                sf::Text usersTitle(ToSFMLString("Benutzerverwaltung"), font, 18u);
+                usersTitle.setFillColor(sf::Color::Black);
+                usersTitle.setPosition(sidebarWidth + 20.f, 130.f);
+                window.draw(usersTitle);
+                
+                // Lade Benutzer beim ersten Mal
+                if (!usersLoaded && !loadingUsers) {
+                    loadingUsers = true;
+                    Services::HttpResponse resp = Services::ApiService::Get("Admin/users");
+                    if (resp.isSuccess && !resp.body.empty()) {
+                        // Parse users JSON array
+                        adminUsers.clear();
+                        std::string body = resp.body;
+                        std::cout << "DEBUG: Users Response: " << body.substr(0, 500) << std::endl;
+                        
+                        // JSON array parsing - extrahiere User-Objekte zwischen { und }
+                        size_t pos = 0;
+                        while ((pos = body.find("{", pos)) != std::string::npos) {
+                            size_t endPos = body.find("}", pos);
+                            if (endPos == std::string::npos) break;
+                            
+                            // Extrahiere das komplette User-Objekt
+                            std::string userObj = body.substr(pos, endPos - pos + 1);
+                            
+                            // Prüfe ob das ein User-Objekt ist (muss "username" enthalten)
+                            if (userObj.find("\"username\"") == std::string::npos) {
+                                pos = endPos + 1;
+                                continue;
+                            }
+                            
+                            UserInfo user;
+                            
+                            // Parse alle Felder aus dem User-Objekt
+                            user.userId = ExtractJsonField(userObj, "id");
+                            user.username = ExtractJsonField(userObj, "username");
+                            user.email = ExtractJsonField(userObj, "email");
+                            user.role = ExtractJsonField(userObj, "role");
+                            user.createdAt = ExtractJsonField(userObj, "createdAt");
+                            user.lastLogin = ExtractJsonField(userObj, "lastLogin");
+                            
+                            // Parse isActive aus JSON
+                            std::string isActiveStr = ExtractJsonField(userObj, "isActive");
+                            user.isActive = (isActiveStr == "true" || isActiveStr == "1");
+                            
+                            std::cout << "DEBUG: Parsed user - username: " << user.username << ", userId: [" << user.userId << "], isActive: " << user.isActive << std::endl;
+                            
+                            adminUsers.push_back(user);
+                            pos = endPos + 1;
+                        }
+                        usersLoaded = true;
+                    }
+                    loadingUsers = false;
+                }
+                
+                if (showCreateUserForm || showEditUserForm) {
+                    // === USER FORM (Create/Edit) ===
+                    sf::RectangleShape formBg(sf::Vector2f(600.f, 400.f));
+                    formBg.setPosition(sidebarWidth + 150.f, 180.f);
+                    formBg.setFillColor(sf::Color::White);
+                    formBg.setOutlineColor(sf::Color(100, 150, 200));
+                    formBg.setOutlineThickness(2.f);
+                    window.draw(formBg);
+                    
+                    std::string formTitle = showEditUserForm ? "Benutzer bearbeiten: " + editUsername : "Neuen Benutzer erstellen";
+                    sf::Text formTitleText(ToSFMLString(formTitle), font, 16u);
+                    formTitleText.setFillColor(sf::Color::Black);
+                    formTitleText.setPosition(sidebarWidth + 170.f, 200.f);
+                    window.draw(formTitleText);
+                    
+                    // Username field (nur im Create-Mode)
+                    if (!showEditUserForm) {
+                        sf::Text usernameLabel(ToSFMLString("Benutzername:"), font, 12u);
+                        usernameLabel.setFillColor(sf::Color::Black);
+                        usernameLabel.setPosition(sidebarWidth + 170.f, 250.f);
+                        window.draw(usernameLabel);
+                        
+                        sf::RectangleShape usernameInput(sf::Vector2f(300.f, 30.f));
+                        usernameInput.setPosition(sidebarWidth + 170.f, 275.f);
+                        usernameInput.setFillColor(usernameFocusedForm ? sf::Color(240, 248, 255) : sf::Color(255, 255, 255));
+                        usernameInput.setOutlineColor(usernameFocusedForm ? sf::Color(70, 130, 180) : sf::Color(180, 180, 180));
+                        usernameInput.setOutlineThickness(1.f);
+                        window.draw(usernameInput);
+                        
+                        sf::Text usernameValue(ToSFMLString(newUsername), font, 12u);
+                        usernameValue.setFillColor(sf::Color::Black);
+                        usernameValue.setPosition(sidebarWidth + 180.f, 282.f);
+                        window.draw(usernameValue);
+                    }
+                    
+                    // Email field
+                    sf::Text emailLabel(ToSFMLString("E-Mail:"), font, 12u);
+                    emailLabel.setFillColor(sf::Color::Black);
+                    emailLabel.setPosition(sidebarWidth + 170.f, showEditUserForm ? 250.f : 320.f);
+                    window.draw(emailLabel);
+                    
+                    sf::RectangleShape emailInput(sf::Vector2f(300.f, 30.f));
+                    emailInput.setPosition(sidebarWidth + 170.f, showEditUserForm ? 275.f : 345.f);
+                    emailInput.setFillColor(emailFocusedForm ? sf::Color(240, 248, 255) : sf::Color(255, 255, 255));
+                    emailInput.setOutlineColor(emailFocusedForm ? sf::Color(70, 130, 180) : sf::Color(180, 180, 180));
+                    emailInput.setOutlineThickness(1.f);
+                    window.draw(emailInput);
+                    
+                    sf::Text emailValue(ToSFMLString(newEmail), font, 12u);
+                    emailValue.setFillColor(sf::Color::Black);
+                    emailValue.setPosition(sidebarWidth + 180.f, showEditUserForm ? 282.f : 352.f);
+                    window.draw(emailValue);
+                    
+                    // Password field
+                    sf::Text passwordLabel(ToSFMLString(showEditUserForm ? "Neues Passwort (optional):" : "Passwort:"), font, 12u);
+                    passwordLabel.setFillColor(sf::Color::Black);
+                    passwordLabel.setPosition(sidebarWidth + 500.f, 250.f);
+                    window.draw(passwordLabel);
+                    
+                    sf::RectangleShape passwordInput(sf::Vector2f(200.f, 30.f));
+                    passwordInput.setPosition(sidebarWidth + 500.f, 275.f);
+                    passwordInput.setFillColor(passwordFocusedForm ? sf::Color(240, 248, 255) : sf::Color(255, 255, 255));
+                    passwordInput.setOutlineColor(passwordFocusedForm ? sf::Color(70, 130, 180) : sf::Color(180, 180, 180));
+                    passwordInput.setOutlineThickness(1.f);
+                    window.draw(passwordInput);
+                    
+                    std::string displayPassword(newPassword.length(), '*');
+                    sf::Text passwordValue(ToSFMLString(displayPassword), font, 12u);
+                    passwordValue.setFillColor(sf::Color::Black);
+                    passwordValue.setPosition(sidebarWidth + 510.f, 282.f);
+                    window.draw(passwordValue);
+                    
+                    // Role selection
+                    sf::Text roleLabel(ToSFMLString("Rolle:"), font, 12u);
+                    roleLabel.setFillColor(sf::Color::Black);
+                    roleLabel.setPosition(sidebarWidth + 500.f, 320.f);
+                    window.draw(roleLabel);
+                    
+                    std::string roleDisplay = newRole == "Administrator" ? "Administrator" : "User";
+                    sf::RectangleShape roleBtn(sf::Vector2f(200.f, 30.f));
+                    roleBtn.setPosition(sidebarWidth + 500.f, 345.f);
+                    roleBtn.setFillColor(sf::Color(220, 220, 220));
+                    roleBtn.setOutlineColor(sf::Color(150, 150, 150));
+                    roleBtn.setOutlineThickness(1.f);
+                    window.draw(roleBtn);
+                    
+                    sf::Text roleValue(ToSFMLString(roleDisplay), font, 12u);
+                    roleValue.setFillColor(sf::Color::Black);
+                    roleValue.setPosition(sidebarWidth + 520.f, 352.f);
+                    window.draw(roleValue);
+                    
+                    // Form message
+                    if (!userFormMessage.empty()) {
+                        sf::RectangleShape msgBox(sf::Vector2f(560.f, 40.f));
+                        msgBox.setPosition(sidebarWidth + 170.f, 390.f);
+                        msgBox.setFillColor(userFormSuccess ? sf::Color(240, 255, 240) : sf::Color(255, 240, 240));
+                        msgBox.setOutlineColor(userFormSuccess ? sf::Color(50, 150, 50) : sf::Color(200, 50, 50));
+                        msgBox.setOutlineThickness(1.f);
+                        window.draw(msgBox);
+                        
+                        sf::Text msgText(ToSFMLString(userFormMessage), font, 11u);
+                        msgText.setFillColor(userFormSuccess ? sf::Color(50, 150, 50) : sf::Color(200, 50, 50));
+                        msgText.setPosition(sidebarWidth + 180.f, 400.f);
+                        window.draw(msgText);
+                    }
+                    
+                    // Buttons
+                    sf::RectangleShape createBtn(sf::Vector2f(100.f, 30.f));
+                    createBtn.setPosition(sidebarWidth + 170.f, 450.f);
+                    createBtn.setFillColor(sf::Color(50, 150, 50));
+                    window.draw(createBtn);
+                    
+                    sf::Text createBtnText(ToSFMLString("Erstellen"), font, 12u);
+                    createBtnText.setFillColor(sf::Color::White);
+                    createBtnText.setPosition(sidebarWidth + 185.f, 457.f);
+                    window.draw(createBtnText);
+                    
+                    sf::RectangleShape cancelBtn(sf::Vector2f(100.f, 30.f));
+                    cancelBtn.setPosition(sidebarWidth + 290.f, 450.f);
+                    cancelBtn.setFillColor(sf::Color(150, 150, 150));
+                    window.draw(cancelBtn);
+                    
+                    sf::Text cancelBtnText(ToSFMLString("Abbrechen"), font, 12u);
+                    cancelBtnText.setFillColor(sf::Color::White);
+                    cancelBtnText.setPosition(sidebarWidth + 300.f, 457.f);
+                    window.draw(cancelBtnText);
+                    
+                } else {
+                    // === USERS LIST VIEW ===
+                    sf::RectangleShape usersBox(sf::Vector2f(900.f, 500.f));
+                    usersBox.setPosition(sidebarWidth + 20.f, 170.f);
+                    usersBox.setFillColor(sf::Color(250, 250, 250));
+                    usersBox.setOutlineColor(sf::Color(180, 180, 180));
+                    usersBox.setOutlineThickness(1.f);
+                    window.draw(usersBox);
+                    
+                    // Create User Button
+                    sf::RectangleShape createUserBtn(sf::Vector2f(180.f, 35.f));
+                    createUserBtn.setPosition(sidebarWidth + 750.f, 135.f);
+                    createUserBtn.setFillColor(sf::Color(34, 139, 34));
+                    window.draw(createUserBtn);
+                    
+                    sf::Text createUserBtnText(ToSFMLString("+ Benutzer erstellen"), font, 12u);
+                    createUserBtnText.setFillColor(sf::Color::White);
+                    createUserBtnText.setPosition(sidebarWidth + 760.f, 143.f);
+                    window.draw(createUserBtnText);
+                    
+                    // Users list
+                    float userY = 190.f;
+                    for (size_t i = 0; i < adminUsers.size(); ++i) {
+                        float itemY = 190.f + (i * 75.f);
+                        if (itemY > 650.f) break; // Stop rendering if beyond view
+                        
+                        // User item background
+                        sf::RectangleShape userItem(sf::Vector2f(890.f, 70.f));
+                        userItem.setPosition(sidebarWidth + 25.f, itemY);
+                        userItem.setFillColor(i % 2 == 0 ? sf::Color(255, 255, 255) : sf::Color(245, 245, 245));
+                        userItem.setOutlineColor(sf::Color(200, 200, 200));
+                        userItem.setOutlineThickness(1.f);
+                        window.draw(userItem);
+                        
+                        // Username
+                        sf::Text userNameText(ToSFMLString(adminUsers[i].username), font, 12u);
+                        userNameText.setFillColor(sf::Color::Black);
+                        userNameText.setPosition(sidebarWidth + 35.f, itemY + 10.f);
+                        window.draw(userNameText);
+                        
+                        // Email
+                        std::string displayEmail = adminUsers[i].email.length() > 30 ? 
+                            adminUsers[i].email.substr(0, 30) + "..." : adminUsers[i].email;
+                        sf::Text emailText(ToSFMLString(displayEmail), font, 11u);
+                        emailText.setFillColor(sf::Color(100, 100, 100));
+                        emailText.setPosition(sidebarWidth + 35.f, itemY + 28.f);
+                        window.draw(emailText);
+                        
+                        // Role
+                        sf::Text roleText(ToSFMLString(adminUsers[i].role), font, 11u);
+                        roleText.setFillColor(adminUsers[i].role == "Administrator" ? sf::Color(200, 50, 50) : sf::Color(100, 100, 100));
+                        roleText.setPosition(sidebarWidth + 450.f, itemY + 10.f);
+                        window.draw(roleText);
+                        
+                        // Activate/Deactivate Button
+                        sf::RectangleShape toggleBtn(sf::Vector2f(90.f, 30.f));
+                        toggleBtn.setPosition(sidebarWidth + 580.f, itemY + 20.f);
+                        toggleBtn.setFillColor(adminUsers[i].isActive ? sf::Color(50, 150, 50) : sf::Color(220, 20, 20));
+                        window.draw(toggleBtn);
+                        
+                        sf::Text toggleBtnText(ToSFMLString(adminUsers[i].isActive ? "Aktiv" : "Inaktiv"), font, 11u);
+                        toggleBtnText.setFillColor(sf::Color::White);
+                        toggleBtnText.setPosition(sidebarWidth + 590.f, itemY + 25.f);
+                        window.draw(toggleBtnText);
+                        
+                        // Edit Button
+                        sf::RectangleShape editBtn(sf::Vector2f(140.f, 30.f));
+                        editBtn.setPosition(sidebarWidth + 690.f, itemY + 20.f);
+                        editBtn.setFillColor(sf::Color(70, 130, 180));
+                        window.draw(editBtn);
+                        
+                        sf::Text editBtnText(ToSFMLString("Bearbeiten"), font, 11u);
+                        editBtnText.setFillColor(sf::Color::White);
+                        editBtnText.setPosition(sidebarWidth + 700.f, itemY + 25.f);
+                        window.draw(editBtnText);
+                    }
+                    
+                    // "Keine Benutzer" Nachricht
+                    if (adminUsers.empty() && usersLoaded) {
+                        sf::Text noUsersText(ToSFMLString("Keine Benutzer vorhanden"), font, 14u);
+                        noUsersText.setFillColor(sf::Color(150, 150, 150));
+                        noUsersText.setPosition(sidebarWidth + 350.f, 350.f);
+                        window.draw(noUsersText);
+                    }
+                }
+                
+            } else if (adminSubTab == 2) {
+                // === DOKUMENTE ===
+                sf::Text docsTitle(ToSFMLString("Dokumentenverwaltung"), font, 18u);
+                docsTitle.setFillColor(sf::Color::Black);
+                docsTitle.setPosition(sidebarWidth + 20.f, 130.f);
+                window.draw(docsTitle);
+                
+                // Lade Dokumente beim ersten Mal
+                if (!adminDocsLoaded && !adminDocsLoading) {
+                    adminDocsLoading = true;
+                    Services::HttpResponse resp = Services::ApiService::Get("Admin/documents");
+                    if (resp.isSuccess && !resp.body.empty()) {
+                        adminDocuments.clear();
+                        std::string body = resp.body;
+                        
+                        // Parse documents array
+                        size_t pos = 0;
+                        while ((pos = body.find("{", pos)) != std::string::npos) {
+                            size_t endPos = body.find("}", pos);
+                            if (endPos == std::string::npos) break;
+                            
+                            std::string docObj = body.substr(pos, endPos - pos + 1);
+                            
+                            if (docObj.find("\"fileName\"") == std::string::npos) {
+                                pos = endPos + 1;
+                                continue;
+                            }
+                            
+                            DocumentInfo doc;
+                            doc.fileId = ExtractJsonField(docObj, "id");
+                            doc.fileName = ExtractJsonField(docObj, "fileName");
+                            doc.uploadedBy = ExtractJsonField(docObj, "uploadedBy");
+                            doc.uploadedAt = ExtractJsonField(docObj, "uploadedAt");
+                            doc.fileSize = ExtractJsonField(docObj, "fileSize");
+                            
+                            adminDocuments.push_back(doc);
+                            pos = endPos + 1;
+                        }
+                        adminDocsLoaded = true;
+                    }
+                    adminDocsLoading = false;
+                }
+                
+                sf::RectangleShape docsBox(sf::Vector2f(900.f, 500.f));
+                docsBox.setPosition(sidebarWidth + 20.f, 170.f);
+                docsBox.setFillColor(sf::Color(250, 250, 250));
+                docsBox.setOutlineColor(sf::Color(180, 180, 180));
+                docsBox.setOutlineThickness(1.f);
+                window.draw(docsBox);
+                
+                if (adminDocuments.empty() && adminDocsLoaded) {
+                    sf::Text noDocs(ToSFMLString("Keine Dokumente vorhanden"), font, 14u);
+                    noDocs.setFillColor(sf::Color(150, 150, 150));
+                    noDocs.setPosition(sidebarWidth + 350.f, 350.f);
+                    window.draw(noDocs);
+                } else {
+                    // Documents list
+                    float docY = 190.f;
+                    for (size_t i = 0; i < adminDocuments.size(); ++i) {
+                        float itemY = docY + (i * 75.f);
+                        if (itemY > 650.f) break;
+                        
+                        // Document item background
+                        sf::RectangleShape docItem(sf::Vector2f(890.f, 70.f));
+                        docItem.setPosition(sidebarWidth + 25.f, itemY);
+                        docItem.setFillColor(i % 2 == 0 ? sf::Color(255, 255, 255) : sf::Color(245, 245, 245));
+                        docItem.setOutlineColor(sf::Color(200, 200, 200));
+                        docItem.setOutlineThickness(1.f);
+                        window.draw(docItem);
+                        
+                        // Filename
+                        std::string displayName = adminDocuments[i].fileName.length() > 50 ? 
+                            adminDocuments[i].fileName.substr(0, 47) + "..." : adminDocuments[i].fileName;
+                        sf::Text fileNameText(ToSFMLString(displayName), font, 12u);
+                        fileNameText.setFillColor(sf::Color::Black);
+                        fileNameText.setPosition(sidebarWidth + 35.f, itemY + 10.f);
+                        window.draw(fileNameText);
+                        
+                        // Uploaded by
+                        sf::Text uploadedByText(ToSFMLString("Von: " + adminDocuments[i].uploadedBy), font, 11u);
+                        uploadedByText.setFillColor(sf::Color(100, 100, 100));
+                        uploadedByText.setPosition(sidebarWidth + 35.f, itemY + 28.f);
+                        window.draw(uploadedByText);
+                        
+                        // Upload date (truncated to 19 chars)
+                        std::string displayDate = adminDocuments[i].uploadedAt.length() > 19 ? 
+                            adminDocuments[i].uploadedAt.substr(0, 19) : adminDocuments[i].uploadedAt;
+                        sf::Text dateText(ToSFMLString(displayDate), font, 11u);
+                        dateText.setFillColor(sf::Color(100, 100, 100));
+                        dateText.setPosition(sidebarWidth + 450.f, itemY + 10.f);
+                        window.draw(dateText);
+                        
+                        // File size
+                        sf::Text sizeText(ToSFMLString("Größe: " + adminDocuments[i].fileSize + " B"), font, 11u);
+                        sizeText.setFillColor(sf::Color(100, 100, 100));
+                        sizeText.setPosition(sidebarWidth + 450.f, itemY + 28.f);
+                        window.draw(sizeText);
+                    }
+                }
+                
+            } else if (adminSubTab == 3) {
+                // === EXTRAKTIONEN ===
+                sf::Text extrsTitle(ToSFMLString("Extraktionsverwaltung"), font, 18u);
+                extrsTitle.setFillColor(sf::Color::Black);
+                extrsTitle.setPosition(sidebarWidth + 20.f, 130.f);
+                window.draw(extrsTitle);
+                
+                // Lade Extraktionen beim ersten Mal
+                if (!adminExtrsLoaded && !adminExtrsLoading) {
+                    adminExtrsLoading = true;
+                    Services::HttpResponse resp = Services::ApiService::Get("Admin/extractions");
+                    if (resp.isSuccess && !resp.body.empty()) {
+                        adminExtractions.clear();
+                        std::string body = resp.body;
+                        
+                        // Parse extractions array
+                        size_t pos = 0;
+                        while ((pos = body.find("{", pos)) != std::string::npos) {
+                            size_t endPos = body.find("}", pos);
+                            if (endPos == std::string::npos) break;
+                            
+                            std::string extrObj = body.substr(pos, endPos - pos + 1);
+                            
+                            if (extrObj.find("\"status\"") == std::string::npos) {
+                                pos = endPos + 1;
+                                continue;
+                            }
+                            
+                            ExtractionInfo extr;
+                            extr.extractionId = ExtractJsonField(extrObj, "id");
+                            extr.fileName = ExtractJsonField(extrObj, "fileName");
+                            extr.extractionMethod = ExtractJsonField(extrObj, "extractionMethod");
+                            extr.completedAt = ExtractJsonField(extrObj, "completedAt");
+                            extr.status = ExtractJsonField(extrObj, "status");
+                            extr.uploadedBy = ExtractJsonField(extrObj, "uploadedBy");
+                            
+                            adminExtractions.push_back(extr);
+                            pos = endPos + 1;
+                        }
+                        adminExtrsLoaded = true;
+                    }
+                    adminExtrsLoading = false;
+                }
+                
+                sf::RectangleShape extrsBox(sf::Vector2f(900.f, 500.f));
+                extrsBox.setPosition(sidebarWidth + 20.f, 170.f);
+                extrsBox.setFillColor(sf::Color(250, 250, 250));
+                extrsBox.setOutlineColor(sf::Color(180, 180, 180));
+                extrsBox.setOutlineThickness(1.f);
+                window.draw(extrsBox);
+                
+                if (adminExtractions.empty() && adminExtrsLoaded) {
+                    sf::Text noExtrs(ToSFMLString("Keine Extraktionen vorhanden"), font, 14u);
+                    noExtrs.setFillColor(sf::Color(150, 150, 150));
+                    noExtrs.setPosition(sidebarWidth + 350.f, 350.f);
+                    window.draw(noExtrs);
+                } else {
+                    // Extractions list
+                    float extrY = 190.f;
+                    for (size_t i = 0; i < adminExtractions.size(); ++i) {
+                        float itemY = extrY + (i * 75.f);
+                        if (itemY > 650.f) break;
+                        
+                        // Extraction item background
+                        sf::RectangleShape extrItem(sf::Vector2f(890.f, 70.f));
+                        extrItem.setPosition(sidebarWidth + 25.f, itemY);
+                        extrItem.setFillColor(i % 2 == 0 ? sf::Color(255, 255, 255) : sf::Color(245, 245, 245));
+                        extrItem.setOutlineColor(sf::Color(200, 200, 200));
+                        extrItem.setOutlineThickness(1.f);
+                        window.draw(extrItem);
+                        
+                        // Filename
+                        std::string displayName = adminExtractions[i].fileName.length() > 50 ? 
+                            adminExtractions[i].fileName.substr(0, 47) + "..." : adminExtractions[i].fileName;
+                        sf::Text fileNameText(ToSFMLString(displayName), font, 12u);
+                        fileNameText.setFillColor(sf::Color::Black);
+                        fileNameText.setPosition(sidebarWidth + 35.f, itemY + 10.f);
+                        window.draw(fileNameText);
+                        
+                        // Extraction method
+                        sf::Text methodText(ToSFMLString("Methode: " + adminExtractions[i].extractionMethod), font, 11u);
+                        methodText.setFillColor(sf::Color(100, 100, 100));
+                        methodText.setPosition(sidebarWidth + 35.f, itemY + 28.f);
+                        window.draw(methodText);
+                        
+                        // Completed date (truncated to 19 chars)
+                        std::string displayDate = adminExtractions[i].completedAt.length() > 19 ? 
+                            adminExtractions[i].completedAt.substr(0, 19) : adminExtractions[i].completedAt;
+                        sf::Text dateText(ToSFMLString(displayDate), font, 11u);
+                        dateText.setFillColor(sf::Color(100, 100, 100));
+                        dateText.setPosition(sidebarWidth + 450.f, itemY + 10.f);
+                        window.draw(dateText);
+                        
+                        // Status (color-coded)
+                        int statusCode = 0;
+                        try {
+                            statusCode = std::stoi(adminExtractions[i].status);
+                        } catch (...) {
+                            statusCode = 0;
+                        }
+                        
+                        std::string statusText;
+                        sf::Color statusColor;
+                        
+                        if (statusCode == 0) {
+                            statusText = "Status: Unbearbeitet";
+                            statusColor = sf::Color(150, 150, 150);
+                        } else if (statusCode == 2) {
+                            statusText = "Status: Completed";
+                            statusColor = sf::Color(50, 150, 50);
+                        } else if (statusCode == 3) {
+                            statusText = "Status: Fehlgeschlagen";
+                            statusColor = sf::Color(200, 50, 50);
+                        } else {
+                            statusText = "Status: Unbekannt";
+                            statusColor = sf::Color(100, 100, 100);
+                        }
+                        
+                        sf::Text statusDisplay(ToSFMLString(statusText), font, 11u);
+                        statusDisplay.setFillColor(statusColor);
+                        statusDisplay.setPosition(sidebarWidth + 450.f, itemY + 28.f);
+                        window.draw(statusDisplay);
+                    }
+                }
+
             }
             
         } else if (activeTab == 4) { // Einstellungen - API URL Settings
