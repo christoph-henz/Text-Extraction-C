@@ -52,6 +52,42 @@ inline std::string ExtractMessageFromJSON(const std::string& json)
     return json.substr(pos + 1, end - pos - 1);
 }
 
+// Extrahiere Wert aus JSON String für ein bestimmtes Feld (String oder Zahl)
+inline std::string ExtractJsonField(const std::string& jsonStr, const std::string& field)
+{
+    size_t pos = jsonStr.find("\"" + field + "\":");
+    if (pos == std::string::npos) return "";
+    
+    pos += field.length() + 3; // Springe über ":
+    
+    // Überspringe Whitespace
+    while (pos < jsonStr.length() && (jsonStr[pos] == ' ' || jsonStr[pos] == '\t')) {
+        pos++;
+    }
+    
+    // Check ob String (mit Anführungszeichen) oder Zahl
+    if (jsonStr[pos] == '"') {
+        // String-Wert
+        pos++;
+        size_t end = jsonStr.find("\"", pos);
+        if (end == std::string::npos) return "";
+        return jsonStr.substr(pos, end - pos);
+    } else {
+        // Numerischer Wert - lese bis zur nächsten Komma oder Klammer
+        size_t end = pos;
+        while (end < jsonStr.length() && jsonStr[end] != ',' && jsonStr[end] != '}' && jsonStr[end] != ']') {
+            end++;
+        }
+        std::string numStr = jsonStr.substr(pos, end - pos);
+        // Entferne Whitespace
+        size_t lastNonSpace = numStr.find_last_not_of(" \t");
+        if (lastNonSpace != std::string::npos) {
+            return numStr.substr(0, lastNonSpace + 1);
+        }
+        return numStr;
+    }
+}
+
 // Text Wrapping für lange Nachrichten
 inline std::vector<std::string> WrapText(const std::string& text, size_t maxCharsPerLine = 60)
 {
@@ -126,6 +162,28 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
     bool isUploading = false;
     bool showUploadSuccess = false;
     bool uploadButtonPressed = false; // Verhindert mehrfache Uploads beim Halten des Buttons
+    
+    // Extraction State
+    struct DocumentInfo {
+        std::string fileId;
+        std::string fileName;
+        std::string uploadDate;
+        std::string fileSize;
+    };
+    std::vector<DocumentInfo> documents;
+    bool showExtractionDetail = false;
+    DocumentInfo selectedDocument{"", "", "", ""};
+    std::string extractedText = "";
+    bool documentsLoaded = false;
+    bool loadingDocuments = false;
+    bool isExtracting = false;
+    std::string extractionStatus = "";
+    bool extractionCompleted = false;
+    std::string extractionMethod = "";
+    std::string completedAt = "";
+    float textScrollOffset = 0.f;  // Für scrollbare Text-Box
+    bool isDraggingScrollBar = false;
+    float maxScrollOffset = 0.f;
     
     // Login State
     std::string loginUsername = "";
@@ -526,6 +584,464 @@ void RunGui(Presentation::ViewModel::MainViewModel &vm)
             // Reset uploadButtonPressed wenn Button losgelassen wird
             if (event.type == sf::Event::MouseButtonReleased) {
                 uploadButtonPressed = false;
+            }
+            
+        } else if (activeTab == 2) { // Extraktion - Document List & Extraction
+            if (!showExtractionDetail) {
+                // === DOCUMENT LIST VIEW ===
+                sf::Text extractionTitle(ToSFMLString("Hochgeladene Dokumente"), font, 20u);
+                extractionTitle.setFillColor(sf::Color::Black);
+                extractionTitle.setPosition(sidebarWidth + 20.f, 70.f);
+                window.draw(extractionTitle);
+                
+                // Lade Dokumente beim ersten Mal
+                if (!documentsLoaded && !loadingDocuments) {
+                    loadingDocuments = true;
+                    // GET /api/Upload/my-documents/
+                    Services::HttpResponse resp = Services::ApiService::Get("Upload/my-documents");
+                    //std::cout << "Extraction API Response Status: " << resp.statusCode << std::endl;
+                    //std::cout << "Extraction API Response Body: " << resp.body << std::endl;
+                    
+                    if (resp.isSuccess && !resp.body.empty()) {
+                        documents.clear();
+                        // Parse JSON Array - vereinfacht für [{fileId, fileName, uploadDate, fileSize}, ...]
+                        size_t pos = 0;
+                        int docCount = 0;
+                        while ((pos = resp.body.find("{", pos)) != std::string::npos) {
+                            size_t endPos = resp.body.find("}", pos);
+                            if (endPos == std::string::npos) break;
+                            
+                            std::string objStr = resp.body.substr(pos, endPos - pos + 1);
+                            
+                            DocumentInfo doc;
+                            doc.fileId = ExtractJsonField(objStr, "id");
+                            doc.fileName = ExtractJsonField(objStr, "fileName");
+                            doc.uploadDate = ExtractJsonField(objStr, "uploadedAt");
+                            doc.fileSize = ExtractJsonField(objStr, "fileSize");
+                            
+                            if (!doc.fileId.empty()) {
+                                documents.push_back(doc);
+                                docCount++;
+                                std::cout << "Dokument " << docCount << " geladen: " << doc.fileName << " (ID: " << doc.fileId << ")" << std::endl;
+                            }
+                            
+                            pos = endPos + 1;
+                        }
+                        std::cout << "Total Dokumente geladen: " << docCount << std::endl;
+                    } else {
+                        std::cout << "Fehler beim Laden der Dokumente. Status: " << resp.statusCode << std::endl;
+                    }
+                    documentsLoaded = true;
+                    loadingDocuments = false;
+                }
+                
+                // Zeichne Dokumentenliste
+                float docY = 120.f;
+                for (size_t i = 0; i < documents.size(); ++i) {
+                    const auto& doc = documents[i];
+                    
+                    // Document Item Box (größer für Button)
+                    sf::RectangleShape docBox(sf::Vector2f(900.f, 70.f));
+                    docBox.setPosition(sidebarWidth + 20.f, docY);
+                    docBox.setFillColor(sf::Color(240, 240, 240));
+                    docBox.setOutlineColor(sf::Color(180, 180, 180));
+                    docBox.setOutlineThickness(1.f);
+                    window.draw(docBox);
+                    
+                    // Dateiname (größer machen) - mit Truncation
+                    std::string displayName = doc.fileName;
+                    if (displayName.length() > 50) {
+                        displayName = displayName.substr(0, 47) + "...";
+                    }
+                    sf::Text docNameText(ToSFMLString(displayName), font, 14u);
+                    docNameText.setFillColor(sf::Color::Black);
+                    docNameText.setPosition(sidebarWidth + 30.f, docY + 8.f);
+                    window.draw(docNameText);
+                    
+                    // Datum und Größe - mit Truncation
+                    std::string metaDisplay = "Upload: ";
+                    std::string dateOnly = doc.uploadDate.length() > 19 ? 
+                        doc.uploadDate.substr(0, 19) : doc.uploadDate;
+                    metaDisplay += dateOnly + " | Größe: " + doc.fileSize + " B";
+                    if (metaDisplay.length() > 80) {
+                        metaDisplay = metaDisplay.substr(0, 77) + "...";
+                    }
+                    sf::Text docMetaText(ToSFMLString(metaDisplay), font, 11u);
+                    docMetaText.setFillColor(sf::Color(100, 100, 100));
+                    docMetaText.setPosition(sidebarWidth + 30.f, docY + 28.f);
+                    window.draw(docMetaText);
+                    
+                    // Extract Button (rechts aligned, innerhalb der Box)
+                    sf::RectangleShape extractBtn(sf::Vector2f(110.f, 40.f));
+                    extractBtn.setPosition(sidebarWidth + 800.f, docY + 15.f);
+                    extractBtn.setFillColor(sf::Color(70, 130, 180));
+                    extractBtn.setOutlineColor(sf::Color(50, 100, 150));
+                    extractBtn.setOutlineThickness(1.f);
+                    window.draw(extractBtn);
+                    
+                    sf::Text extractBtnText(ToSFMLString("Öffnen"), font, 12u);
+                    extractBtnText.setFillColor(sf::Color::White);
+                    extractBtnText.setPosition(sidebarWidth + 823.f, docY + 20.f);
+                    window.draw(extractBtnText);
+                    
+                    // Click Handler für Extract Button
+                    if (event.type == sf::Event::MouseButtonPressed) {
+                        if (event.mouseButton.x >= sidebarWidth + 800.f && event.mouseButton.x <= sidebarWidth + 910.f &&
+                            event.mouseButton.y >= docY + 15.f && event.mouseButton.y <= docY + 55.f) {
+                            selectedDocument = doc;
+                            extractedText = "";
+                            extractionStatus = "";
+                            extractionCompleted = false;
+                            extractionMethod = "";
+                            completedAt = "";
+                            textScrollOffset = 0.f;
+                            showExtractionDetail = true;
+                            
+                            // Lade vorhandene Extraktion vom Server
+                            std::string extractionUrl = "Extraction/result/" + doc.fileId;
+                            Services::HttpResponse resp = Services::ApiService::Get(extractionUrl);
+                            
+                            if (resp.isSuccess && !resp.body.empty()) {
+                                // Parse JSON Response
+                                extractedText = ExtractJsonField(resp.body, "extractedText");
+                                extractionMethod = ExtractJsonField(resp.body, "extractionMethod");
+                                completedAt = ExtractJsonField(resp.body, "completedAt");
+                                
+                                if (!extractedText.empty()) {
+                                    extractionStatus = "Vorhandene Extraktion geladen";
+                                    extractionCompleted = true;
+                                    std::cout << "Vorhandene Extraktion geladen für: " << doc.fileName << std::endl;
+                                    std::cout << "ExtractionMethod: " << extractionMethod << std::endl;
+                                    std::cout << "CompletedAt: " << completedAt << std::endl;
+                                } else {
+                                    extractionStatus = "Keine Extraktion vorhanden";
+                                    extractionCompleted = false;
+                                }
+                            } else {
+                                extractedText = "";
+                                extractionStatus = "";
+                                extractionCompleted = false;
+                                std::cout << "Keine vorhandene Extraktion für: " << doc.fileName << " (Status: " << resp.statusCode << ")" << std::endl;
+                            }
+                            
+                            std::cout << "Extraction Detail für: " << doc.fileName << " (ID: " << doc.fileId << ")" << std::endl;
+                        }
+                    }
+                    
+                    docY += 85.f;
+                }
+                
+                // "Keine Dokumente" Nachricht
+                if (documents.empty() && documentsLoaded) {
+                    sf::Text noDocsText(ToSFMLString("Keine hochgeladenen Dokumente vorhanden"), font, 14u);
+                    noDocsText.setFillColor(sf::Color(150, 150, 150));
+                    noDocsText.setPosition(sidebarWidth + 20.f, 150.f);
+                    window.draw(noDocsText);
+                }
+            } else {
+                // === EXTRACTION DETAIL VIEW ===
+                sf::Text detailTitle(ToSFMLString("Extraktion: " + selectedDocument.fileName), font, 18u);
+                detailTitle.setFillColor(sf::Color::Black);
+                detailTitle.setPosition(sidebarWidth + 20.f, 70.f);
+                window.draw(detailTitle);
+                
+                // Zurück Button
+                sf::RectangleShape backBtn(sf::Vector2f(100.f, 35.f));
+                backBtn.setPosition(sidebarWidth + 20.f, 110.f);
+                backBtn.setFillColor(sf::Color(100, 100, 100));
+                window.draw(backBtn);
+                
+                sf::Text backBtnText(ToSFMLString("< Zurück"), font, 12u);
+                backBtnText.setFillColor(sf::Color::White);
+                backBtnText.setPosition(sidebarWidth + 35.f, 118.f);
+                window.draw(backBtnText);
+                
+                // Click Handler für Zurück Button
+                if (event.type == sf::Event::MouseButtonPressed) {
+                    if (event.mouseButton.x >= sidebarWidth + 20.f && event.mouseButton.x <= sidebarWidth + 120.f &&
+                        event.mouseButton.y >= 110.f && event.mouseButton.y <= 145.f) {
+                        showExtractionDetail = false;
+                        std::cout << "Zurück zur Dokumentenliste" << std::endl;
+                    }
+                }
+                
+                // Extraction Button
+                sf::RectangleShape extractBtn(sf::Vector2f(150.f, 35.f));
+                extractBtn.setPosition(sidebarWidth + 130.f, 110.f);
+                extractBtn.setFillColor(isExtracting ? sf::Color(100, 100, 100) : sf::Color(34, 139, 34));
+                extractBtn.setOutlineColor(sf::Color(20, 100, 20));
+                extractBtn.setOutlineThickness(1.f);
+                window.draw(extractBtn);
+                
+                sf::Text extractBtnText(ToSFMLString(isExtracting ? "Extrahiert..." : "Extraktion starten"), font, 12u);
+                extractBtnText.setFillColor(sf::Color::White);
+                extractBtnText.setPosition(sidebarWidth + 145.f, 118.f);
+                window.draw(extractBtnText);
+                
+                // Click Handler für Extract Button
+                if (event.type == sf::Event::MouseButtonPressed && !isExtracting) {
+                    if (event.mouseButton.x >= sidebarWidth + 130.f && event.mouseButton.x <= sidebarWidth + 280.f &&
+                        event.mouseButton.y >= 110.f && event.mouseButton.y <= 145.f) {
+                        isExtracting = true;
+                        extractionStatus = "Starte Extraktion...";
+                        extractionCompleted = false;
+                        
+                        // POST Request: /api/Extraction/{documentId}
+                        std::string extractionUrl = "Extraction/" + selectedDocument.fileId;
+                        std::string jsonBody = R"({
+                            "enableOCR": false,
+                            "language": "de",
+                            "maxPages": 5,
+                            "preserveFormatting": false,
+                            "enableLanguageModel": false,
+                            "maxSummaryLength": 0
+                        })";
+                        
+                        Services::HttpResponse resp = Services::ApiService::Post(extractionUrl, jsonBody);
+                        
+                        if (resp.isSuccess) {
+                            extractionStatus = "Extraktion erfolgreich!";
+                            extractedText = resp.body;
+                            extractionCompleted = true;
+                            std::cout << "Extraction erfolgreich für: " << selectedDocument.fileName << std::endl;
+                            std::cout << "Response: " << resp.body << std::endl;
+                        } else {
+                            extractionStatus = "Fehler bei Extraktion: Status " + std::to_string(resp.statusCode);
+                            extractedText = "Fehler beim Extrahieren des Textes.";
+                            std::cout << "Extraction fehlgeschlagen. Status: " << resp.statusCode << std::endl;
+                            std::cout << "Response: " << resp.body << std::endl;
+                        }
+                        
+                        isExtracting = false;
+                    }
+                }
+                
+                // Document Info Panel
+                sf::RectangleShape infoPanel(sf::Vector2f(900.f, 70.f));
+                infoPanel.setPosition(sidebarWidth + 20.f, 160.f);
+                infoPanel.setFillColor(sf::Color(235, 245, 255));
+                infoPanel.setOutlineColor(sf::Color(100, 150, 200));
+                infoPanel.setOutlineThickness(1.f);
+                window.draw(infoPanel);
+                
+                // Document Info - Filename
+                sf::Text docNameLabel(ToSFMLString("Datei: "), font, 11u);
+                docNameLabel.setFillColor(sf::Color(50, 50, 50));
+                docNameLabel.setPosition(sidebarWidth + 30.f, 170.f);
+                window.draw(docNameLabel);
+                
+                sf::Text docNameValue(ToSFMLString(selectedDocument.fileName), font, 11u);
+                docNameValue.setFillColor(sf::Color::Black);
+                docNameValue.setPosition(sidebarWidth + 90.f, 170.f);
+                window.draw(docNameValue);
+                
+                // Document Info - Upload Date (truncated)
+                sf::Text docDateLabel(ToSFMLString("Upload: "), font, 11u);
+                docDateLabel.setFillColor(sf::Color(50, 50, 50));
+                docDateLabel.setPosition(sidebarWidth + 450.f, 170.f);
+                window.draw(docDateLabel);
+                
+                std::string displayUploadDate = selectedDocument.uploadDate.length() > 19 ? 
+                    selectedDocument.uploadDate.substr(0, 19) : selectedDocument.uploadDate;
+                sf::Text docDateValue(ToSFMLString(displayUploadDate), font, 11u);
+                docDateValue.setFillColor(sf::Color::Black);
+                docDateValue.setPosition(sidebarWidth + 530.f, 170.f);
+                window.draw(docDateValue);
+                
+                // Document Info - File Size
+                sf::Text docSizeLabel(ToSFMLString("Größe: "), font, 11u);
+                docSizeLabel.setFillColor(sf::Color(50, 50, 50));
+                docSizeLabel.setPosition(sidebarWidth + 30.f, 190.f);
+                window.draw(docSizeLabel);
+                
+                sf::Text docSizeValue(ToSFMLString(selectedDocument.fileSize + " Bytes"), font, 11u);
+                docSizeValue.setFillColor(sf::Color::Black);
+                docSizeValue.setPosition(sidebarWidth + 110.f, 190.f);
+                window.draw(docSizeValue);
+                
+                // Extracted Text Box Header
+                sf::Text textBoxHeader(ToSFMLString("Extrahierter Text:"), font, 13u);
+                textBoxHeader.setFillColor(sf::Color::Black);
+                textBoxHeader.setPosition(sidebarWidth + 20.f, 250.f);
+                window.draw(textBoxHeader);
+                
+                // Metadata Panel (ExtractionMethod & CompletedAt)
+                if (extractionCompleted && !extractionMethod.empty()) {
+                    sf::RectangleShape metadataPanel(sf::Vector2f(900.f, 25.f));
+                    metadataPanel.setPosition(sidebarWidth + 20.f, 275.f);
+                    metadataPanel.setFillColor(sf::Color(245, 245, 245));
+                    metadataPanel.setOutlineColor(sf::Color(200, 200, 200));
+                    metadataPanel.setOutlineThickness(1.f);
+                    window.draw(metadataPanel);
+                    
+                    sf::Text methodLabel(ToSFMLString("Methode: "), font, 10u);
+                    methodLabel.setFillColor(sf::Color(80, 80, 80));
+                    methodLabel.setPosition(sidebarWidth + 30.f, 280.f);
+                    window.draw(methodLabel);
+                    
+                    std::string displayMethod = extractionMethod;
+                    if (displayMethod.length() > 30) {
+                        displayMethod = displayMethod.substr(0, 27) + "...";
+                    }
+                    sf::Text methodValue(ToSFMLString(displayMethod), font, 10u);
+                    methodValue.setFillColor(sf::Color::Black);
+                    methodValue.setPosition(sidebarWidth + 110.f, 280.f);
+                    window.draw(methodValue);
+                    
+                    if (!completedAt.empty()) {
+                        sf::Text dateLabel(ToSFMLString(" | Abgeschlossen: "), font, 10u);
+                        dateLabel.setFillColor(sf::Color(80, 80, 80));
+                        dateLabel.setPosition(sidebarWidth + 350.f, 280.f);
+                        window.draw(dateLabel);
+                        
+                        std::string displayCompletedAt = completedAt.length() > 19 ? 
+                            completedAt.substr(0, 19) : completedAt;
+                        sf::Text dateValue(ToSFMLString(displayCompletedAt), font, 10u);
+                        dateValue.setFillColor(sf::Color::Black);
+                        dateValue.setPosition(sidebarWidth + 540.f, 280.f);
+                        window.draw(dateValue);
+                    }
+                }
+                
+                // Text Area für extraierten Text (scrollbar)
+                float textBoxY = extractionCompleted && !extractionMethod.empty() ? 310.f : 280.f;
+                float textBoxHeight = extractionCompleted && !extractionMethod.empty() ? 310.f : 330.f;
+                
+                sf::RectangleShape textBox(sf::Vector2f(900.f, textBoxHeight));
+                textBox.setPosition(sidebarWidth + 20.f, textBoxY);
+                textBox.setFillColor(sf::Color(255, 255, 255));
+                textBox.setOutlineColor(sf::Color(180, 180, 180));
+                textBox.setOutlineThickness(1.f);
+                window.draw(textBox);
+                
+                // Scroll-Handling mit Mausrad (weniger empfindlich)
+                if (event.type == sf::Event::MouseWheelScrolled && extractionCompleted && !extractedText.empty()) {
+                    // Prüfe ob Maus über Text-Box ist
+                    if (event.mouseWheelScroll.x >= sidebarWidth + 20.f && event.mouseWheelScroll.x <= sidebarWidth + 920.f &&
+                        event.mouseWheelScroll.y >= textBoxY && event.mouseWheelScroll.y <= textBoxY + textBoxHeight) {
+                        textScrollOffset -= event.mouseWheelScroll.delta * 10.f;  // Reduziert von 30.f auf 10.f
+                        if (textScrollOffset < 0.f) textScrollOffset = 0.f;
+                        if (textScrollOffset > maxScrollOffset) textScrollOffset = maxScrollOffset;
+                    }
+                }
+                
+                // Scroll-Bar Mouse Input (Press & Drag)
+                if (event.type == sf::Event::MouseButtonPressed && extractionCompleted && !extractedText.empty()) {
+                    auto textLines = WrapText(extractedText, 110);
+                    if ((int)textLines.size() > (int)(textBoxHeight / 18.f) - 1) {
+                        float totalHeight = textLines.size() * 18.f;
+                        float scrollRatio = textBoxHeight / totalHeight;
+                        float scrollBarHeight = textBoxHeight * scrollRatio;
+                        float scrollBarY = textBoxY + (textScrollOffset / totalHeight) * textBoxHeight;
+                        
+                        // Check ob auf Scrollbar geklickt
+                        if (event.mouseButton.x >= sidebarWidth + 910.f && event.mouseButton.x <= sidebarWidth + 918.f &&
+                            event.mouseButton.y >= scrollBarY && event.mouseButton.y <= scrollBarY + scrollBarHeight) {
+                            isDraggingScrollBar = true;
+                            maxScrollOffset = totalHeight - textBoxHeight;
+                        }
+                    }
+                }
+                
+                // Scroll-Bar Release
+                if (event.type == sf::Event::MouseButtonReleased) {
+                    isDraggingScrollBar = false;
+                }
+                
+                // Scroll-Bar Dragging (im Main Loop)
+                if (isDraggingScrollBar && extractionCompleted && !extractedText.empty()) {
+                    auto textLines = WrapText(extractedText, 110);
+                    float totalHeight = textLines.size() * 18.f;
+                    
+                    // Berechne neue Scroll-Position basierend auf Maus-Position
+                    float mouseY = sf::Mouse::getPosition(window).y;
+                    float relativeY = mouseY - textBoxY;
+                    if (relativeY < 0.f) relativeY = 0.f;
+                    if (relativeY > textBoxHeight) relativeY = textBoxHeight;
+                    
+                    textScrollOffset = (relativeY / textBoxHeight) * totalHeight;
+                    if (textScrollOffset < 0.f) textScrollOffset = 0.f;
+                    maxScrollOffset = totalHeight - textBoxHeight;
+                    if (textScrollOffset > maxScrollOffset) textScrollOffset = maxScrollOffset;
+                }
+                
+                // Status Text (wenn noch nicht extrahiert)
+                if (!extractionCompleted && extractionStatus.empty()) {
+                    sf::Text placeholderText(ToSFMLString("Klicke auf 'Extraktion starten' um den Text zu extrahieren"), font, 12u);
+                    placeholderText.setFillColor(sf::Color(150, 150, 150));
+                    placeholderText.setPosition(sidebarWidth + 30.f, textBoxY + 20.f);
+                    window.draw(placeholderText);
+                } else if (extractionCompleted && !extractedText.empty()) {
+                    // Zeige extrahierten Text mit Scrolling
+                    auto textLines = WrapText(extractedText, 110);
+                    float textY = textBoxY + 10.f - textScrollOffset;
+                    int lineCount = 0;
+                    int maxVisibleLines = (int)(textBoxHeight / 18.f) - 1;
+                    
+                    for (size_t i = 0; i < textLines.size(); ++i) {
+                        float adjustedY = textY + (i * 18.f);
+                        
+                        // Nur zeichnen wenn vertikal sichtbar
+                        if (adjustedY >= textBoxY - 20.f && adjustedY <= textBoxY + textBoxHeight) {
+                            // Begrenze Textlänge um sicherzustellen dass nichts hinausragt
+                            std::string displayLine = textLines[i];
+                            if (displayLine.length() > 110) {
+                                displayLine = displayLine.substr(0, 107) + "...";
+                            }
+                            
+                            sf::Text lineText(ToSFMLString(displayLine), font, 11u);
+                            lineText.setFillColor(sf::Color::Black);
+                            lineText.setPosition(sidebarWidth + 30.f, adjustedY);
+                            
+                            // Nur zeichnen wenn innerhalb der Box-Grenzen
+                            if (adjustedY >= textBoxY && adjustedY <= textBoxY + textBoxHeight - 5.f) {
+                                window.draw(lineText);
+                            }
+                            lineCount++;
+                        }
+                    }
+                    
+                    // Scrollbar-Indikator zeichnen wenn nötig
+                    if ((int)textLines.size() > maxVisibleLines) {
+                        float totalHeight = textLines.size() * 18.f;
+                        float scrollRatio = textBoxHeight / totalHeight;
+                        float scrollBarHeight = textBoxHeight * scrollRatio;
+                        float scrollBarY = textBoxY + (textScrollOffset / totalHeight) * textBoxHeight;
+                        
+                        sf::RectangleShape scrollBar(sf::Vector2f(8.f, scrollBarHeight));
+                        scrollBar.setPosition(sidebarWidth + 910.f, scrollBarY);
+                        scrollBar.setFillColor(isDraggingScrollBar ? sf::Color(100, 100, 200) : sf::Color(150, 150, 150));
+                        scrollBar.setOutlineColor(sf::Color(100, 100, 100));
+                        scrollBar.setOutlineThickness(1.f);
+                        window.draw(scrollBar);
+                    }
+                    
+                    // Text Statistics
+                    int charCount = extractedText.length();
+                    int wordCount = 0;
+                    bool inWord = false;
+                    for (char c : extractedText) {
+                        if (std::isspace(c)) {
+                            inWord = false;
+                        } else if (!inWord) {
+                            wordCount++;
+                            inWord = true;
+                        }
+                    }
+                    
+                    sf::RectangleShape statsPanel(sf::Vector2f(900.f, 40.f));
+                    statsPanel.setPosition(sidebarWidth + 20.f, textBoxY + textBoxHeight + 5.f);
+                    statsPanel.setFillColor(sf::Color(240, 250, 240));
+                    statsPanel.setOutlineColor(sf::Color(150, 200, 150));
+                    statsPanel.setOutlineThickness(1.f);
+                    window.draw(statsPanel);
+                    
+                    std::string statsText = "Zeichen: " + std::to_string(charCount) + " | Wörter: " + std::to_string(wordCount) + " | Zeilen: " + std::to_string(textLines.size());
+                    sf::Text statsLabel(ToSFMLString(statsText), font, 11u);
+                    statsLabel.setFillColor(sf::Color(50, 100, 50));
+                    statsLabel.setPosition(sidebarWidth + 30.f, textBoxY + textBoxHeight + 10.f);
+                    window.draw(statsLabel);
+                }
             }
             
         } else if (activeTab == 4) { // Einstellungen - API URL Settings
